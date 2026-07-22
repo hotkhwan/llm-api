@@ -12,6 +12,8 @@ go vet ./...
 
 Local container builds are intentionally omitted. The shared CI platform builds the digest-pinned `Dockerfile`; see [the CI contract](docs/ci-contract.md) and [deployment interface](docs/deployment.md).
 
+Remote CI is not wired yet and is blocked on the shared kdeploy D3 onboarding tracked by deployment PR #131. Local validation must not be presented as remote CI evidence.
+
 ## Runtime
 
 Copy `.env.example` values into your process environment and run `go run ./cmd/api`. The service exposes:
@@ -25,3 +27,7 @@ Configuration is restricted to the non-secret settings documented in `.env.examp
 ## Branch flow
 
 `feat/*` → `develop` → `main`
+
+## License
+
+Copyright (c) 2026. All rights reserved. Public visibility does not grant an open-source license or determine ownership; see [NOTICE](NOTICE).

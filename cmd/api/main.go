@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -12,8 +11,11 @@ import (
 
 	"github.com/hotkhwan/affiliate-api/internal/buildinfo"
 	"github.com/hotkhwan/affiliate-api/internal/config"
+	"github.com/hotkhwan/affiliate-api/internal/lifecycle"
 	"github.com/hotkhwan/affiliate-api/internal/server"
 )
+
+var notifyContext = signal.NotifyContext
 
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -29,40 +31,31 @@ func run(logger *slog.Logger) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	listener, err := net.Listen("tcp", cfg.HTTPAddr)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-
 	readiness := server.NewReadiness()
-	app := server.New(logger, buildinfo.Current(), readiness)
-	errCh := make(chan error, 1)
-	readiness.Set(true)
-
-	go func() {
-		errCh <- app.Listener(listener)
-	}()
-
-	logger.Info("service started", "address", listener.Addr().String(), "environment", cfg.Environment)
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	app := server.New(logger, buildinfo.Current(), readiness, server.Options{
+		ReadTimeout:  cfg.ReadTimeout,
+		WriteTimeout: cfg.WriteTimeout,
+		IdleTimeout:  cfg.IdleTimeout,
+		BodyLimit:    cfg.BodyLimit,
+		Concurrency:  cfg.Concurrency,
+	})
+	ctx, stop := serviceContext()
 	defer stop()
-
-	select {
-	case err := <-errCh:
-		if err == nil {
-			return nil
-		}
-		return fmt.Errorf("serve: %w", err)
-	case <-ctx.Done():
-		readiness.Set(false)
-		logger.Info("shutdown requested")
-		if err := app.ShutdownWithTimeout(cfg.ShutdownTimeout); err != nil {
-			return fmt.Errorf("graceful shutdown: %w", err)
-		}
-		if err := <-errCh; err != nil && !errors.Is(err, net.ErrClosed) {
-			return fmt.Errorf("serve after shutdown: %w", err)
-		}
-		logger.Info("service stopped cleanly")
-		return nil
+	logger.Info("service starting", "address", cfg.HTTPAddr, "environment", cfg.Environment)
+	if err := lifecycle.Run(ctx, lifecycle.Config{
+		Address:         cfg.HTTPAddr,
+		ShutdownTimeout: cfg.ShutdownTimeout,
+	}, lifecycle.Dependencies{
+		Listen:    net.Listen,
+		Service:   app,
+		Readiness: readiness,
+	}); err != nil {
+		return err
 	}
+	logger.Info("service stopped cleanly")
+	return nil
+}
+
+func serviceContext() (context.Context, context.CancelFunc) {
+	return notifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 }
