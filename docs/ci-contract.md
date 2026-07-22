@@ -2,7 +2,7 @@
 
 ## Current status: not wired
 
-There is currently no Jenkins job, GitHub Actions workflow, or other remote CI attached to this repository. CI onboarding is blocked on the shared kdeploy D3 work tracked by deployment PR #131. Until that dependency is merged, configured, and observed successfully, no branch or pull request in this repository may claim remote CI coverage.
+There is currently no Jenkins job, GitHub Actions workflow, or other remote CI attached to this repository. The restricted/private [klynx-cluster-deploy PR #131](https://github.com/pointitconsulting/klynx-cluster-deploy/pull/131) is a D1 security prerequisite only; it does not implement D3. The later D3 onboarding work remains unimplemented, and no D3 job exists for this repository. Until D3 is implemented, configured, and observed successfully, no branch or pull request in this repository may claim remote CI coverage.
 
 The intended shared-pipeline job names are:
 

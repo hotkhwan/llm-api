@@ -12,7 +12,7 @@ go vet ./...
 
 Local container builds are intentionally omitted. The shared CI platform builds the digest-pinned `Dockerfile`; see [the CI contract](docs/ci-contract.md) and [deployment interface](docs/deployment.md).
 
-Remote CI is not wired yet and is blocked on the shared kdeploy D3 onboarding tracked by deployment PR #131. Local validation must not be presented as remote CI evidence.
+Remote CI is not wired. The restricted/private [klynx-cluster-deploy PR #131](https://github.com/pointitconsulting/klynx-cluster-deploy/pull/131) is a D1 security prerequisite only; it does not implement D3. D3 onboarding is later work and remains unimplemented. Local validation must not be presented as remote CI evidence.
 
 ## Runtime
 
