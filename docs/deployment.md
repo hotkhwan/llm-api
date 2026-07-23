@@ -20,4 +20,6 @@ All values in `.env.example` are non-secret. Future secret inputs require an exp
 
 ## Build toolchain
 
+The repository-root `VERSION` file is the sole application-version authority. Container builds must pass its exact validated SemVer as `VERSION` and the full 40-character lowercase source commit as `VCS_REF`. The Dockerfile rejects missing, malformed, or mismatched metadata and records both values in the binary and OCI image labels. Deployments must reject an image when its labels or `GET /version` response differ from the D3 evidence for that version/SHA pair.
+
 The source declares Go `1.26.0` language/module semantics and the patched `go1.26.5` toolchain. The container builder is `golang:1.26.5-alpine` pinned to OCI index digest `sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2`. Version selection is based on the [official Go release metadata](https://go.dev/dl/?mode=json); the digest is resolved from the registry for the [Docker Official Image for Go](https://hub.docker.com/_/golang). Updating either value requires rerunning tests, vet, and `govulncheck` without performing a local production or container build.
