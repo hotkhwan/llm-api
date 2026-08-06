@@ -24,7 +24,7 @@ func TestMissionHTTPFlow(t *testing.T) {
 		t.Fatalf("create status = %d", response.StatusCode)
 	}
 	for shot := 1; shot <= 3; shot++ {
-		response = missionRequest(t, app, "PUT", fmt.Sprintf("/v1/missions/mission-http-1/assets/%d", shot), "video/mp4", []byte("clip"))
+		response = missionRequest(t, app, "PUT", fmt.Sprintf("/v1/missions/mission-http-1/assets/%d", shot), "image/jpeg", []byte{0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00})
 		if response.StatusCode != 200 {
 			t.Fatalf("upload %d status = %d", shot, response.StatusCode)
 		}

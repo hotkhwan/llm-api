@@ -3,11 +3,15 @@ package mission
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"path"
+	"sort"
 	"strings"
 	"time"
 )
@@ -59,12 +63,21 @@ func (s *Service) Upload(ctx context.Context, id string, shot int, contentType s
 	if err != nil {
 		return Mission{}, err
 	}
-	if m.State != StateMissionAccepted && m.State != StateCaptureStarted {
+	if m.State != StateMissionAccepted && m.State != StateCaptureStarted && m.State != StateAssetsUploaded {
 		return Mission{}, ErrInvalidState
 	}
+	detected := strings.Split(http.DetectContentType(body), ";")[0]
+	if !compatibleMediaType(contentType, detected) {
+		return Mission{}, fmt.Errorf("asset bytes do not match content type")
+	}
+	hash := sha256.Sum256(body)
+	digest := hex.EncodeToString(hash[:])
 	for _, asset := range m.Assets {
 		if asset.Shot == shot {
-			return Mission{}, fmt.Errorf("shot %d already uploaded", shot)
+			if asset.SHA256 == digest && asset.ContentType == contentType {
+				return m, nil
+			}
+			return Mission{}, fmt.Errorf("shot %d already contains a different asset", shot)
 		}
 	}
 	ext := extensionFor(contentType)
@@ -94,6 +107,9 @@ func (s *Service) GenerateDraft(ctx context.Context, id string) (Mission, error)
 	if err != nil {
 		return Mission{}, err
 	}
+	if m.State == StateDraftReady || m.State == StateExported || m.State == StatePosted {
+		return m, nil
+	}
 	if m.State != StateAssetsUploaded {
 		return Mission{}, ErrInvalidState
 	}
@@ -104,7 +120,9 @@ func (s *Service) GenerateDraft(ctx context.Context, id string) (Mission, error)
 		return Mission{}, err
 	}
 	timeline := make([]Clip, 0, 3)
-	for _, asset := range m.Assets {
+	assets := append([]Asset(nil), m.Assets...)
+	sort.Slice(assets, func(i, j int) bool { return assets[i].Shot < assets[j].Shot })
+	for _, asset := range assets {
 		timeline = append(timeline, Clip{Shot: asset.Shot, StorageKey: asset.StorageKey, StartMS: 0, EndMS: 3000})
 	}
 	m.Draft = &Draft{Caption: result.Caption, CTA: result.CTA, Hashtags: result.Hashtags, Timeline: timeline, GeneratedBy: result.Provider}
@@ -127,6 +145,9 @@ func (s *Service) Export(ctx context.Context, id string) (Mission, error) {
 	if err != nil {
 		return Mission{}, err
 	}
+	if m.State == StateExported || m.State == StatePosted {
+		return m, nil
+	}
 	if m.State != StateDraftReady {
 		return Mission{}, ErrInvalidState
 	}
@@ -143,14 +164,17 @@ func (s *Service) Export(ctx context.Context, id string) (Mission, error) {
 }
 
 func (s *Service) MarkPosted(ctx context.Context, id, platform, postURL string) (Mission, error) {
+	platform = strings.ToLower(strings.TrimSpace(platform))
 	m, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return Mission{}, err
 	}
 	if m.State != StateExported {
+		if m.State == StatePosted && m.Posted != nil && m.Posted.Platform == platform && m.Posted.PostURL == postURL {
+			return m, nil
+		}
 		return Mission{}, ErrInvalidState
 	}
-	platform = strings.ToLower(strings.TrimSpace(platform))
 	if platform == "" {
 		return Mission{}, fmt.Errorf("platform is required")
 	}
@@ -203,4 +227,13 @@ func extensionFor(contentType string) string {
 	default:
 		return ".bin"
 	}
+}
+
+func compatibleMediaType(claimed, detected string) bool {
+	if claimed == detected {
+		return true
+	}
+	// Browsers commonly use these equivalent values for the same bytes.
+	return (claimed == "image/jpg" && detected == "image/jpeg") ||
+		(claimed == "video/quicktime" && detected == "video/mp4")
 }

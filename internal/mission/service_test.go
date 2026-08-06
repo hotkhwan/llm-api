@@ -19,14 +19,20 @@ func TestFirstMissionFlow(t *testing.T) {
 	if m.State != StateMissionAccepted || len(m.Shots) != 3 {
 		t.Fatalf("created mission = %#v", m)
 	}
-	for shot := 1; shot <= 3; shot++ {
-		m, err = service.Upload(ctx, m.ID, shot, "video/mp4", []byte("clip"))
+	assetBody := []byte{0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00}
+	for _, shot := range []int{3, 1, 2} {
+		m, err = service.Upload(ctx, m.ID, shot, "image/jpeg", assetBody)
 		if err != nil {
 			t.Fatalf("upload shot %d: %v", shot, err)
 		}
 	}
 	if m.State != StateAssetsUploaded || len(m.Assets) != 3 {
 		t.Fatalf("uploaded mission = %#v", m)
+	}
+	versionAfterUpload := m.Version
+	m, err = service.Upload(ctx, m.ID, 2, "image/jpeg", assetBody)
+	if err != nil || m.Version != versionAfterUpload {
+		t.Fatalf("idempotent upload: version=%d err=%v", m.Version, err)
 	}
 	m, err = service.GenerateDraft(ctx, m.ID)
 	if err != nil {
@@ -35,9 +41,24 @@ func TestFirstMissionFlow(t *testing.T) {
 	if m.State != StateDraftReady || m.Draft == nil || m.Draft.GeneratedBy != "deterministic-fallback" || len(m.Draft.Timeline) != 3 {
 		t.Fatalf("draft mission = %#v", m)
 	}
+	for index, clip := range m.Draft.Timeline {
+		if clip.Shot != index+1 {
+			t.Fatalf("timeline order = %#v", m.Draft.Timeline)
+		}
+	}
+	versionAfterDraft := m.Version
+	m, err = service.GenerateDraft(ctx, m.ID)
+	if err != nil || m.Version != versionAfterDraft {
+		t.Fatalf("idempotent draft: version=%d err=%v", m.Version, err)
+	}
 	m, err = service.Export(ctx, m.ID)
 	if err != nil {
 		t.Fatalf("export: %v", err)
+	}
+	versionAfterExport := m.Version
+	m, err = service.Export(ctx, m.ID)
+	if err != nil || m.Version != versionAfterExport {
+		t.Fatalf("idempotent export: version=%d err=%v", m.Version, err)
 	}
 	if m.State != StateExported || m.Export == nil || m.Export.Format != "video/mp4" {
 		t.Fatalf("exported mission = %#v", m)
@@ -45,6 +66,11 @@ func TestFirstMissionFlow(t *testing.T) {
 	m, err = service.MarkPosted(ctx, m.ID, "TikTok", "https://www.tiktok.com/@example/video/1")
 	if err != nil {
 		t.Fatalf("mark posted: %v", err)
+	}
+	versionAfterPost := m.Version
+	m, err = service.MarkPosted(ctx, m.ID, "TIKTOK", "https://www.tiktok.com/@example/video/1")
+	if err != nil || m.Version != versionAfterPost {
+		t.Fatalf("idempotent post: version=%d err=%v", m.Version, err)
 	}
 	if m.State != StatePosted || m.Posted == nil || m.Posted.Platform != "tiktok" {
 		t.Fatalf("posted mission = %#v", m)
@@ -70,10 +96,14 @@ func TestFirstMissionRejectsOutOfOrderAndDuplicateActions(t *testing.T) {
 	if _, err := service.Upload(ctx, m.ID, 1, "text/plain", []byte("bad")); err == nil {
 		t.Fatal("accepted non-media upload")
 	}
-	if _, err := service.Upload(ctx, m.ID, 1, "image/jpeg", []byte("photo")); err != nil {
+	if _, err := service.Upload(ctx, m.ID, 1, "image/jpeg", []byte("plain text")); err == nil {
+		t.Fatal("accepted media type that did not match its bytes")
+	}
+	photo := []byte{0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00}
+	if _, err := service.Upload(ctx, m.ID, 1, "image/jpeg", photo); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Upload(ctx, m.ID, 1, "image/jpeg", []byte("duplicate")); err == nil {
+	if _, err := service.Upload(ctx, m.ID, 1, "image/jpeg", append(photo, 0x01)); err == nil {
 		t.Fatal("accepted duplicate shot")
 	}
 }
@@ -88,5 +118,33 @@ func TestCaptionFallsBackWhenLocalModelUnavailable(t *testing.T) {
 	result, err := (FallbackCaptioner{Primary: failingCaptioner{}}).Generate(context.Background(), CaptionRequest{Product: Product{Name: "สินค้า"}})
 	if err != nil || result.Provider != "deterministic-fallback" {
 		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
+type prohibitedCaptioner struct{}
+
+func (prohibitedCaptioner) Generate(context.Context, CaptionRequest) (CaptionResult, error) {
+	return CaptionResult{Caption: "รับประกันรายได้แน่นอน", Provider: "unsafe"}, nil
+}
+
+func TestCaptionFallsBackForProhibitedIncomeClaim(t *testing.T) {
+	result, err := (FallbackCaptioner{Primary: prohibitedCaptioner{}}).Generate(context.Background(), CaptionRequest{Product: Product{Name: "สินค้า"}})
+	if err != nil || result.Provider != "deterministic-fallback" {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}
+
+func TestMemoryRepositoryRejectsStaleSave(t *testing.T) {
+	repo := NewMemoryRepository()
+	m := Mission{ID: "m1", Version: 1}
+	if err := repo.Create(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	m.State = StateCaptureStarted
+	if err := repo.Save(context.Background(), m, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.Save(context.Background(), m, 1); !errors.Is(err, ErrVersionConflict) {
+		t.Fatalf("stale save error = %v", err)
 	}
 }

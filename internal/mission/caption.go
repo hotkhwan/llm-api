@@ -12,7 +12,7 @@ type FallbackCaptioner struct{ Primary CaptionGenerator }
 
 func (g FallbackCaptioner) Generate(ctx context.Context, request CaptionRequest) (CaptionResult, error) {
 	if g.Primary != nil {
-		if result, err := g.Primary.Generate(ctx, request); err == nil && strings.TrimSpace(result.Caption) != "" {
+		if result, err := g.Primary.Generate(ctx, request); err == nil && safeGeneratedContent(result) {
 			return result, nil
 		}
 	}
@@ -23,4 +23,17 @@ func (g FallbackCaptioner) Generate(ctx context.Context, request CaptionRequest)
 		Hashtags: []string{"#ลองแล้วบอกต่อ", "#Affiliate"},
 		Provider: "deterministic-fallback",
 	}, nil
+}
+
+func safeGeneratedContent(result CaptionResult) bool {
+	combined := strings.ToLower(strings.Join(append([]string{result.Caption, result.CTA}, result.Hashtags...), " "))
+	if strings.TrimSpace(result.Caption) == "" || len([]rune(result.Caption)) > 500 || len(result.Hashtags) > 12 {
+		return false
+	}
+	for _, prohibited := range []string{"รับประกันรายได้", "รายได้แน่นอน", "รวยเร็ว", "guaranteed income", "get rich quick"} {
+		if strings.Contains(combined, prohibited) {
+			return false
+		}
+	}
+	return true
 }

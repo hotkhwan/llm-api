@@ -36,6 +36,11 @@ currently reserves the immutable target
 `missions/{missionId}/exports/first-post.mp4`; rendering the bytes is delegated
 to the upcoming FFmpeg worker.
 
+Asset bytes are sniffed and must match the declared media type. Retrying an
+identical shot, draft, export, or mark-posted operation returns the existing
+result without changing its version or adding duplicate ledger entries;
+conflicting retries fail closed.
+
 ## Next implementation backlog
 
 1. MongoDB repository plus indexes and transactional outbox.

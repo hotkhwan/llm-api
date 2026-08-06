@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,7 +29,11 @@ func (g OpenAICompatibleCaptioner) Generate(ctx context.Context, request Caption
 	if model == "" {
 		return CaptionResult{}, fmt.Errorf("local LLM model is required")
 	}
-	prompt := fmt.Sprintf("สินค้า: %s\nข้อมูลจริง: %s\nเขียน JSON ภาษาไทยเท่านั้น รูปแบบ caption, cta, hashtags ห้ามสร้างราคา โปรโมชั่น หรือคุณสมบัติที่ไม่มีในข้อมูล", request.Product.Name, request.Product.Description)
+	productFacts, err := json.Marshal(request.Product)
+	if err != nil {
+		return CaptionResult{}, err
+	}
+	prompt := fmt.Sprintf("ข้อมูลสินค้าจริง JSON: %s\nเขียน JSON ภาษาไทยเท่านั้น รูปแบบ caption, cta, hashtags ใช้เฉพาะข้อมูลใน JSON ห้ามสร้างราคา โปรโมชั่น คุณสมบัติ ผลลัพธ์ หรือคำสัญญารายได้", productFacts)
 	payload := map[string]any{
 		"model":           model,
 		"temperature":     0.2,
@@ -66,7 +71,7 @@ func (g OpenAICompatibleCaptioner) Generate(ctx context.Context, request Caption
 			TotalTokens int64 `json:"total_tokens"`
 		} `json:"usage"`
 	}
-	if err := json.NewDecoder(response.Body).Decode(&completion); err != nil {
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&completion); err != nil {
 		return CaptionResult{}, fmt.Errorf("decode local LLM response: %w", err)
 	}
 	if len(completion.Choices) == 0 {
