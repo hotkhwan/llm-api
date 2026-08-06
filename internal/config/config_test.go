@@ -60,6 +60,7 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"HTTP_CONCURRENCY": "63"},
 		{"HTTP_CONCURRENCY": "8193"},
 		{"HTTP_CONCURRENCY": "many"},
+		{"LOCAL_LLM_URL": "not-a-url"},
 	}
 	for _, values := range tests {
 		if _, err := Load(func(key string) string { return values[key] }); err == nil {

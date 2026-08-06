@@ -1,6 +1,13 @@
-# affiliate-api
+# KWANNI API
 
-Minimal Go/Fiber API service scaffold. This repository currently contains platform foundations only; application behavior will be introduced through separately reviewed contracts.
+Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.2.0`
+adds the first end-to-end Mission Zero slice:
+
+`manual product → mission → 3-shot capture → draft → export → mark posted`
+
+The current media step creates a deterministic edit plan and export target. An
+FFmpeg worker, MongoDB adapter, and SeaweedFS S3 production adapter remain
+explicit deployment work; see [Mission Zero Phase 1](docs/mission-zero-phase1.md).
 
 ## Local checks
 
@@ -29,6 +36,16 @@ Copy `.env.example` values into your process environment and run `go run ./cmd/a
 - `GET /healthz`
 - `GET /readyz`
 - `GET /version`
+- `POST /v1/missions`
+- `GET /v1/missions/{id}`
+- `PUT /v1/missions/{id}/assets/{shot}`
+- `POST /v1/missions/{id}/draft`
+- `POST /v1/missions/{id}/export`
+- `POST /v1/missions/{id}/posted`
+
+The local LLM is optional. If it is unavailable or returns invalid structured
+output, the API uses a deterministic Thai caption so First Mission remains
+usable. No endpoint promises income or sales.
 
 Configuration is restricted to the non-secret settings documented in `.env.example`. JSON request logs are written to stdout and include a validated or generated `X-Request-ID`.
 

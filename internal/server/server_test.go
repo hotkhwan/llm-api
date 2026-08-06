@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/hotkhwan/affiliate-api/internal/buildinfo"
+	"github.com/hotkhwan/llm-api/internal/buildinfo"
 )
 
 func testOptions() Options {

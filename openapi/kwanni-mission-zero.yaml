@@ -1,0 +1,157 @@
+openapi: 3.1.0
+info:
+  title: KWANNI Mission Zero API
+  version: 0.2.0
+  description: First Mission API. It does not promise sales or income.
+servers:
+  - url: /v1
+paths:
+  /missions:
+    post:
+      operationId: createMission
+      summary: Create a mission from manually entered product facts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMission'
+      responses:
+        '201':
+          description: Mission accepted with a three-shot guide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+        '400': { $ref: '#/components/responses/Error' }
+  /missions/{id}:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    get:
+      operationId: getMission
+      responses:
+        '200':
+          description: Current mission
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '404': { $ref: '#/components/responses/Error' }
+  /missions/{id}/assets/{shot}:
+    parameters:
+      - { $ref: '#/components/parameters/MissionId' }
+      - name: shot
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 3 }
+    put:
+      operationId: uploadShot
+      summary: Upload one raw image or video for a guided shot
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, contentEncoding: binary } }
+          image/png: { schema: { type: string, contentEncoding: binary } }
+          video/mp4: { schema: { type: string, contentEncoding: binary } }
+      responses:
+        '200':
+          description: Asset recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/draft:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: generateDraft
+      responses:
+        '200':
+          description: Caption and deterministic edit plan are ready
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/export:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: exportDraft
+      responses:
+        '200':
+          description: Vertical MP4 export target reserved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/posted:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: markPosted
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform]
+              properties:
+                platform: { type: string }
+                postUrl: { type: string, format: uri }
+      responses:
+        '200':
+          description: First Post recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+components:
+  parameters:
+    MissionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: Request failed
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+                  requestId: { type: string }
+  schemas:
+    CreateMission:
+      type: object
+      required: [userId, product]
+      properties:
+        userId: { type: string }
+        product:
+          type: object
+          required: [name, description]
+          properties:
+            name: { type: string }
+            description: { type: string }
+            price: { type: string }
+            promotion: { type: string }
+            facts: { type: array, items: { type: string } }
+    Mission:
+      type: object
+      required: [id, userId, product, state, shots, version, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        product: { type: object }
+        state:
+          type: string
+          enum: [missionAccepted, captureStarted, assetsUploaded, draftGenerating, draftReady, exported, posted]
+        shots: { type: array, items: { type: object } }
+        assets: { type: array, items: { type: object } }
+        draft: { type: object }
+        export: { type: object }
+        posted: { type: object }
+        version: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }

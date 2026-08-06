@@ -13,16 +13,16 @@ ARG VCS_REF
 RUN ./scripts/verify-version.sh "${VERSION}" "${VCS_REF}" && \
     CGO_ENABLED=0 GOOS=linux go build \
     -trimpath \
-    -ldflags="-s -w -X github.com/hotkhwan/affiliate-api/internal/buildinfo.version=${VERSION} -X github.com/hotkhwan/affiliate-api/internal/buildinfo.commit=${VCS_REF}" \
-    -o /out/affiliate-api ./cmd/api
+    -ldflags="-s -w -X github.com/hotkhwan/llm-api/internal/buildinfo.version=${VERSION} -X github.com/hotkhwan/llm-api/internal/buildinfo.commit=${VCS_REF}" \
+    -o /out/llm-api ./cmd/api
 
 FROM scratch
 ARG VERSION
 ARG VCS_REF
-LABEL org.opencontainers.image.source="https://github.com/hotkhwan/affiliate-api" \
+LABEL org.opencontainers.image.source="https://github.com/hotkhwan/llm-api" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}"
 USER 65532:65532
-COPY --from=build --chown=65532:65532 /out/affiliate-api /affiliate-api
+COPY --from=build --chown=65532:65532 /out/llm-api /llm-api
 EXPOSE 8080
-ENTRYPOINT ["/affiliate-api"]
+ENTRYPOINT ["/llm-api"]

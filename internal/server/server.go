@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/hotkhwan/affiliate-api/internal/buildinfo"
+	"github.com/hotkhwan/llm-api/internal/buildinfo"
+	"github.com/hotkhwan/llm-api/internal/mission"
 )
 
 const requestIDHeader = "X-Request-ID"
@@ -26,6 +27,7 @@ type Options struct {
 	BodyLimit    int
 	Concurrency  int
 	RequestID    RequestIDGenerator
+	Mission      *mission.Service
 }
 
 type Readiness struct {
@@ -45,7 +47,7 @@ func New(logger *slog.Logger, metadata buildinfo.Provider, readiness *Readiness,
 		options.RequestID = randomRequestID
 	}
 	app := fiber.New(fiber.Config{
-		AppName:               "affiliate-api",
+		AppName:               "llm-api",
 		DisableStartupMessage: true,
 		ReadTimeout:           options.ReadTimeout,
 		WriteTimeout:          options.WriteTimeout,
@@ -67,6 +69,9 @@ func New(logger *slog.Logger, metadata buildinfo.Provider, readiness *Readiness,
 	app.Get("/version", func(c *fiber.Ctx) error {
 		return c.JSON(metadata.Metadata())
 	})
+	if options.Mission != nil {
+		mission.NewHTTPHandler(options.Mission).Register(app.Group("/v1"))
+	}
 
 	return app
 }

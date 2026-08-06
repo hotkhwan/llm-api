@@ -16,7 +16,11 @@ Use a read-only root filesystem, drop all capabilities, and disallow privilege e
 
 Suggested probe paths are `/healthz` for liveness and `/readyz` for readiness. The initial readiness check has no external dependency; later integrations must add dependency-specific readiness without exposing credentials or internal error details.
 
-All values in `.env.example` are non-secret. Future secret inputs require an explicit secret-provider contract and must not be added to `.env.example`, image layers, command-line arguments, or logs.
+All values in `.env.example` are non-secret. `LOCAL_LLM_URL` must target the
+private OpenAI-compatible gateway and `LOCAL_LLM_MODEL` selects its model; the
+mission flow remains operational when the endpoint is empty or unavailable.
+Future secret inputs require an explicit secret-provider contract and must not
+be added to `.env.example`, image layers, command-line arguments, or logs.
 
 ## Build toolchain
 

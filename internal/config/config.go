@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ type Config struct {
 	IdleTimeout     time.Duration
 	BodyLimit       int
 	Concurrency     int
+	LocalLLMURL     string
+	LocalLLMModel   string
 }
 
 type LookupEnv func(string) string
@@ -44,6 +47,8 @@ func Load(lookup LookupEnv) (Config, error) {
 		IdleTimeout:     defaultIdleTimeout,
 		BodyLimit:       defaultBodyLimit,
 		Concurrency:     defaultConcurrency,
+		LocalLLMURL:     strings.TrimSpace(lookup("LOCAL_LLM_URL")),
+		LocalLLMModel:   valueOrDefault(lookup("LOCAL_LLM_MODEL"), "Qwen3.6-27B-MTP-GGUF"),
 	}
 
 	if !isEnvironment(cfg.Environment) {
@@ -77,6 +82,12 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if cfg.Concurrency, err = intSetting(lookup, "HTTP_CONCURRENCY", cfg.Concurrency, 64, 8192); err != nil {
 		return Config{}, err
+	}
+	if cfg.LocalLLMURL != "" {
+		parsed, parseErr := url.Parse(cfg.LocalLLMURL)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			return Config{}, fmt.Errorf("LOCAL_LLM_URL must be an absolute http(s) URL")
+		}
 	}
 
 	return cfg, nil
