@@ -40,6 +40,8 @@ Asset bytes are sniffed and must match the declared media type. Retrying an
 identical shot, draft, export, or mark-posted operation returns the existing
 result without changing its version or adding duplicate ledger entries;
 conflicting retries fail closed.
+The domain also verifies that the storage adapter returns the requested key,
+media type, byte count, and SHA-256 digest before recording an asset.
 
 ## Next implementation backlog
 

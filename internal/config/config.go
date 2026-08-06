@@ -85,7 +85,7 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if cfg.LocalLLMURL != "" {
 		parsed, parseErr := url.Parse(cfg.LocalLLMURL)
-		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
 			return Config{}, fmt.Errorf("LOCAL_LLM_URL must be an absolute http(s) URL")
 		}
 	}

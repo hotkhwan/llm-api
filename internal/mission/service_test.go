@@ -3,6 +3,7 @@ package mission
 import (
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 )
@@ -146,5 +147,30 @@ func TestMemoryRepositoryRejectsStaleSave(t *testing.T) {
 	}
 	if err := repo.Save(context.Background(), m, 1); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("stale save error = %v", err)
+	}
+}
+
+type inconsistentObjectStore struct{}
+
+func (inconsistentObjectStore) Put(context.Context, string, string, io.Reader) (ObjectMetadata, error) {
+	return ObjectMetadata{Key: "wrong/key", ContentType: "image/jpeg", Bytes: 7, SHA256: "wrong"}, nil
+}
+
+func TestUploadRejectsInconsistentObjectStoreMetadata(t *testing.T) {
+	service := NewService(NewMemoryRepository(), inconsistentObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "mission-1" })
+	m, err := service.Create(context.Background(), "user-1", Product{Name: "สินค้า", Description: "ข้อมูลจริง"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte{0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00}
+	if _, err := service.Upload(context.Background(), m.ID, 1, "image/jpeg", body); err == nil {
+		t.Fatal("accepted inconsistent object metadata")
+	}
+	stored, err := service.Get(context.Background(), m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Assets) != 0 || stored.State != StateMissionAccepted {
+		t.Fatalf("mission changed after rejected store metadata: %#v", stored)
 	}
 }

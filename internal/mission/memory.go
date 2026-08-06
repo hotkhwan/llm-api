@@ -53,6 +53,7 @@ func (r *MemoryRepository) Save(_ context.Context, mission Mission, expected int
 }
 
 func cloneMission(value Mission) Mission {
+	value.Product.Facts = append([]string(nil), value.Product.Facts...)
 	value.Shots = append([]Shot(nil), value.Shots...)
 	value.Assets = append([]Asset(nil), value.Assets...)
 	if value.Draft != nil {

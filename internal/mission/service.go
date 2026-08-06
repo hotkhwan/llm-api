@@ -86,6 +86,9 @@ func (s *Service) Upload(ctx context.Context, id string, shot int, contentType s
 	if err != nil {
 		return Mission{}, err
 	}
+	if metadata.Key != key || metadata.ContentType != contentType || metadata.Bytes != int64(len(body)) || metadata.SHA256 != digest {
+		return Mission{}, fmt.Errorf("object store returned inconsistent metadata")
+	}
 	from := m.State
 	m.Assets = append(m.Assets, Asset{Shot: shot, StorageKey: metadata.Key, ContentType: metadata.ContentType, Bytes: metadata.Bytes, SHA256: metadata.SHA256})
 	if len(m.Assets) == 3 {
@@ -214,7 +217,7 @@ func IsConflict(err error) bool {
 
 func extensionFor(contentType string) string {
 	switch contentType {
-	case "image/jpeg":
+	case "image/jpeg", "image/jpg":
 		return ".jpg"
 	case "image/png":
 		return ".png"
@@ -224,6 +227,8 @@ func extensionFor(contentType string) string {
 		return ".mp4"
 	case "video/webm":
 		return ".webm"
+	case "video/quicktime":
+		return ".mov"
 	default:
 		return ".bin"
 	}
