@@ -14,8 +14,9 @@ const (
 	defaultEnvironment     = "development"
 	defaultShutdownTimeout = 10 * time.Second
 	defaultReadTimeout     = 5 * time.Second
-	defaultWriteTimeout    = 60 * time.Second
+	defaultWriteTimeout    = 120 * time.Second
 	defaultIdleTimeout     = 60 * time.Second
+	defaultLocalLLMTimeout = 105 * time.Second
 	defaultBodyLimit       = 64 << 20
 	defaultConcurrency     = 1024
 )
@@ -33,6 +34,7 @@ type Config struct {
 	LocalLLMURL                string
 	LocalLLMModel              string
 	LocalLLMAPIKey             string
+	LocalLLMTimeout            time.Duration
 	MongoURI                   string
 	MongoDatabase              string
 	S3Endpoint                 string
@@ -70,6 +72,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		LocalLLMURL:                strings.TrimSpace(lookup("LOCAL_LLM_URL")),
 		LocalLLMModel:              valueOrDefault(lookup("LOCAL_LLM_MODEL"), "qwen3.6-27b-q8_0-mtp-16k"),
 		LocalLLMAPIKey:             strings.TrimSpace(lookup("LOCAL_LLM_API_KEY")),
+		LocalLLMTimeout:            defaultLocalLLMTimeout,
 		MongoURI:                   strings.TrimSpace(lookup("MONGO_URI")),
 		MongoDatabase:              valueOrDefault(lookup("MONGO_DATABASE"), "kwanni"),
 		S3Endpoint:                 strings.TrimSpace(lookup("S3_ENDPOINT")),
@@ -108,6 +111,12 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if cfg.IdleTimeout, err = durationSetting(lookup, "HTTP_IDLE_TIMEOUT", cfg.IdleTimeout, 5*time.Second, 5*time.Minute); err != nil {
 		return Config{}, err
+	}
+	if cfg.LocalLLMTimeout, err = durationSetting(lookup, "LOCAL_LLM_TIMEOUT", cfg.LocalLLMTimeout, 5*time.Second, 110*time.Second); err != nil {
+		return Config{}, err
+	}
+	if cfg.LocalLLMURL != "" && cfg.LocalLLMTimeout >= cfg.WriteTimeout {
+		return Config{}, fmt.Errorf("LOCAL_LLM_TIMEOUT must be shorter than HTTP_WRITE_TIMEOUT")
 	}
 	if cfg.WriteTimeout < cfg.ReadTimeout {
 		return Config{}, fmt.Errorf("HTTP_WRITE_TIMEOUT must be greater than or equal to HTTP_READ_TIMEOUT")

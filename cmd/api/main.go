@@ -87,7 +87,7 @@ func run(logger *slog.Logger) error {
 	}
 	var localPlanner mission.ProductionPlanner
 	if cfg.LocalLLMURL != "" {
-		client := &http.Client{Timeout: 45 * time.Second}
+		client := &http.Client{Timeout: cfg.LocalLLMTimeout}
 		localPlanner = mission.OpenAICompatiblePlanner{Endpoint: cfg.LocalLLMURL, Model: cfg.LocalLLMModel, APIKey: cfg.LocalLLMAPIKey, Client: client}
 	}
 	planner := mission.FallbackPlanner{Primary: localPlanner, Fallback: mission.CaptionBackedPlanner{Captions: mission.FallbackCaptioner{}}}

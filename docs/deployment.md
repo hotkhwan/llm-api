@@ -18,6 +18,8 @@ Suggested probe paths are `/healthz` for liveness and `/readyz` for readiness. T
 
 All values in `.env.example` are non-secret. `LOCAL_LLM_URL` must target the
 private OpenAI-compatible gateway and `LOCAL_LLM_MODEL` selects its model; the
+planner uses non-thinking structured generation and `LOCAL_LLM_TIMEOUT`
+(default 105 seconds) must remain shorter than `HTTP_WRITE_TIMEOUT`.
 mission flow remains operational when the endpoint is empty or unavailable.
 Production requires MongoDB, the internal SeaweedFS S3 endpoint, a public
 SeaweedFS presign endpoint and OIDC verification. Secrets `MONGO_URI`,

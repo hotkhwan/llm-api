@@ -35,6 +35,16 @@ func TestOpenAICompatiblePlannerUsesOneRuntimeAndBearerSecret(t *testing.T) {
 		if r.Header.Get("Authorization") != "Bearer private-test-key" {
 			t.Fatalf("authorization header missing")
 		}
+		var request struct {
+			MaxTokens          int             `json:"max_tokens"`
+			ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if request.MaxTokens != 2048 || request.ChatTemplateKwargs["enable_thinking"] {
+			t.Fatalf("unexpected bounded planner settings: %#v", request)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(content)}}}, "usage": map[string]int{"total_tokens": 123}})
 	}))
 	defer server.Close()

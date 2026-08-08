@@ -11,7 +11,7 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if cfg.Environment != "development" || cfg.HTTPAddr != ":8080" || cfg.ShutdownTimeout != 10*time.Second ||
-		cfg.ReadTimeout != 5*time.Second || cfg.WriteTimeout != 60*time.Second || cfg.IdleTimeout != 60*time.Second ||
+		cfg.ReadTimeout != 5*time.Second || cfg.WriteTimeout != 120*time.Second || cfg.IdleTimeout != 60*time.Second || cfg.LocalLLMTimeout != 105*time.Second ||
 		cfg.BodyLimit != 64<<20 || cfg.Concurrency != 1024 {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
@@ -27,6 +27,7 @@ func TestLoadOverrides(t *testing.T) {
 		"HTTP_IDLE_TIMEOUT":     "90s",
 		"HTTP_BODY_LIMIT_BYTES": "2048",
 		"HTTP_CONCURRENCY":      "128",
+		"LOCAL_LLM_TIMEOUT":     "19s",
 		"MONGO_URI":             "mongodb://mongo.invalid:27017",
 		"S3_ENDPOINT":           "http://s3.invalid:9000",
 		"S3_PRESIGN_ENDPOINT":   "https://site-s3.invalid",
@@ -41,7 +42,7 @@ func TestLoadOverrides(t *testing.T) {
 	}
 	if cfg.Environment != "production" || cfg.HTTPAddr != "127.0.0.1:9090" || cfg.ShutdownTimeout != 30*time.Second ||
 		cfg.ReadTimeout != 2*time.Second || cfg.WriteTimeout != 20*time.Second || cfg.IdleTimeout != 90*time.Second ||
-		cfg.BodyLimit != 2048 || cfg.Concurrency != 128 {
+		cfg.BodyLimit != 2048 || cfg.Concurrency != 128 || cfg.LocalLLMTimeout != 19*time.Second {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 }
@@ -71,6 +72,9 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"HTTP_CONCURRENCY": "many"},
 		{"LOCAL_LLM_URL": "not-a-url"},
 		{"LOCAL_LLM_URL": "http://user:secret@localhost:18080/v1"},
+		{"LOCAL_LLM_TIMEOUT": "4s"},
+		{"LOCAL_LLM_TIMEOUT": "111s"},
+		{"LOCAL_LLM_URL": "http://localhost:18080/v1", "HTTP_WRITE_TIMEOUT": "30s", "LOCAL_LLM_TIMEOUT": "30s"},
 		{"SHOTVL_THRESHOLD": "1.1"},
 		{"SHOTVL_THRESHOLD": "fast"},
 		{"SHOTVL_URL": "not-a-url"},

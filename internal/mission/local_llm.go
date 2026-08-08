@@ -47,7 +47,15 @@ Return one JSON object with keys caption, cta, hashtags, productionSpec. product
 Verified product JSON: %s
 Safe deterministic skeleton to improve without changing facts: %s
 Thai output. Never invent price, promotion, product capability, sales result or income promise.`, ProductionSpecSchemaVersion, facts, skeletonJSON)
-	payload := map[string]any{"model": g.Model, "temperature": 0.6, "top_p": 0.95, "response_format": map[string]string{"type": "json_object"}, "messages": []map[string]string{{"role": "system", "content": "You are the KWANNI production brain. Produce strictly typed, truthful affiliate production plans."}, {"role": "user", "content": prompt}}}
+	payload := map[string]any{
+		"model":                g.Model,
+		"temperature":          0.6,
+		"top_p":                0.95,
+		"max_tokens":           2048,
+		"response_format":      map[string]string{"type": "json_object"},
+		"chat_template_kwargs": map[string]bool{"enable_thinking": false},
+		"messages":             []map[string]string{{"role": "system", "content": "You are the KWANNI production brain. Produce strictly typed, truthful affiliate production plans."}, {"role": "user", "content": prompt}},
+	}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return PlanResult{}, err
