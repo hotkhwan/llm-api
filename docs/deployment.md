@@ -34,6 +34,11 @@ command-line arguments, or logs. Non-secret runtime keys are:
   gateway that strips caller-provided identity headers; production forbids it.
 - `LOCAL_LLM_URL=http://local-ai-bridge.local-ai.svc.cluster.local:18082/v1`
   and `LOCAL_LLM_MODEL=qwen3.6-27b-q8_0-mtp-16k`.
+- Optional `SHOTVL_URL`, `SHOTVL_MODEL`, immutable
+  `SHOTVL_MODEL_REVISION`, and `SHOTVL_THRESHOLD` enable advisory visual QC;
+  `SHOTVL_API_KEY` is secret. The endpoint is a load-on-demand scheduler
+  boundary and must serialize GPU use against Qwen. The application enforces a
+  single global Mongo-leased ShotVL job but cannot itself unload either model.
 
 The export endpoint is pollable: its first call returns `exportQueued`; later
 calls refresh job state and return `exported` plus a fresh 15-minute signed URL

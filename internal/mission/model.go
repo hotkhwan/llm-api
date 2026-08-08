@@ -214,6 +214,61 @@ type NextAction struct {
 	Reason string `json:"reason"`
 }
 
+type VisualQCMetric struct {
+	ShotSize         float64 `json:"shotSize"`
+	Composition      float64 `json:"composition"`
+	CameraAngle      float64 `json:"cameraAngle"`
+	Depth            float64 `json:"depth"`
+	Lighting         float64 `json:"lighting"`
+	SubjectPlacement float64 `json:"subjectPlacement"`
+	ProductPlacement float64 `json:"productPlacement"`
+}
+
+type VisualQCDefect struct {
+	Code             string   `json:"code"`
+	Severity         string   `json:"severity"`
+	Message          string   `json:"message"`
+	EvidenceFrameIDs []string `json:"evidenceFrameIds"`
+}
+
+type VisualQCShot struct {
+	ShotID  string           `json:"shotId"`
+	Metrics VisualQCMetric   `json:"metrics"`
+	Defects []VisualQCDefect `json:"defects,omitempty"`
+}
+
+type EvidenceFrame struct {
+	ID          string `json:"id"`
+	StorageKey  string `json:"storageKey"`
+	TimestampMS int    `json:"timestampMs"`
+}
+
+type VisualQCReport struct {
+	Revision       int             `json:"revision"`
+	ModelRevision  string          `json:"modelRevision"`
+	Threshold      float64         `json:"threshold"`
+	Score          float64         `json:"score"`
+	Passed         bool            `json:"passed"`
+	EvidenceFrames []EvidenceFrame `json:"evidenceFrames"`
+	Shots          []VisualQCShot  `json:"shots"`
+	CreatedAt      time.Time       `json:"createdAt"`
+}
+
+type VisualQCOverride struct {
+	Decision string    `json:"decision"`
+	Reason   string    `json:"reason"`
+	By       string    `json:"by"`
+	At       time.Time `json:"at"`
+}
+
+type VisualQCState struct {
+	Job            *ProcessingJob    `json:"job,omitempty"`
+	LatestReport   *VisualQCReport   `json:"latestReport,omitempty"`
+	History        []VisualQCReport  `json:"history"`
+	Warning        string            `json:"warning,omitempty"`
+	ManualOverride *VisualQCOverride `json:"manualOverride,omitempty"`
+}
+
 type Mission struct {
 	ID                string             `json:"id"`
 	UserID            string             `json:"userId"`
@@ -229,6 +284,7 @@ type Mission struct {
 	ExportJob         *ProcessingJob     `json:"exportJob,omitempty"`
 	Outcome           *Outcome           `json:"outcome,omitempty"`
 	NextAction        *NextAction        `json:"nextAction,omitempty"`
+	VisualQC          *VisualQCState     `json:"visualQc,omitempty"`
 	Version           int64              `json:"version"`
 	CreatedAt         time.Time          `json:"createdAt"`
 	UpdatedAt         time.Time          `json:"updatedAt"`

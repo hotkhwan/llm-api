@@ -54,6 +54,8 @@ func run(logger *slog.Logger) error {
 	var ledger mission.AuditSink = &mission.MemoryLedger{}
 	var exportQueue mission.ExportQueue = mission.NewMemoryJobQueue(time.Now, id)
 	var exportWorker *mission.FFmpegExportQueue
+	var visualQueue mission.VisualQCQueue
+	var visualWorker *mission.ShotVLQueue
 	var mongoClient *mongo.Client
 	if cfg.MongoURI != "" {
 		mongoClient, err = mongo.Connect(context.Background(), options.Client().ApplyURI(cfg.MongoURI))
@@ -77,6 +79,11 @@ func run(logger *slog.Logger) error {
 		repo, ledger, objects = store, store, seaweed
 		exportWorker = &mission.FFmpegExportQueue{Jobs: store, Objects: seaweed, Reader: seaweed, Runner: mission.ExecCommandRunner{}, Now: time.Now, Timeout: 5 * time.Minute}
 		exportQueue = exportWorker
+		if cfg.ShotVLURL != "" {
+			analyzer := mission.OpenAICompatibleVisualQC{Endpoint: cfg.ShotVLURL, Model: cfg.ShotVLModel, ModelRevision: cfg.ShotVLModelRevision, APIKey: cfg.ShotVLAPIKey, Threshold: cfg.ShotVLThreshold, Client: &http.Client{Timeout: 3 * time.Minute}}
+			visualWorker = &mission.ShotVLQueue{Jobs: store, Objects: seaweed, Reader: seaweed, Runner: mission.ExecCommandRunner{}, Analyzer: analyzer, Now: time.Now, WorkerID: "visual-" + id(), Timeout: 5 * time.Minute}
+			visualQueue = visualWorker
+		}
 	}
 	var localPlanner mission.ProductionPlanner
 	if cfg.LocalLLMURL != "" {
@@ -84,7 +91,7 @@ func run(logger *slog.Logger) error {
 		localPlanner = mission.OpenAICompatiblePlanner{Endpoint: cfg.LocalLLMURL, Model: cfg.LocalLLMModel, APIKey: cfg.LocalLLMAPIKey, Client: client}
 	}
 	planner := mission.FallbackPlanner{Primary: localPlanner, Fallback: mission.CaptionBackedPlanner{Captions: mission.FallbackCaptioner{}}}
-	missionService := mission.NewServiceWithOptions(repo, objects, planner, exportQueue, nil, ledger, time.Now, id, int64(cfg.BodyLimit))
+	missionService := mission.NewServiceWithOptions(repo, objects, planner, exportQueue, visualQueue, ledger, time.Now, id, int64(cfg.BodyLimit))
 	app := server.New(logger, buildinfo.Current(), readiness, server.Options{
 		ReadTimeout:                cfg.ReadTimeout,
 		WriteTimeout:               cfg.WriteTimeout,
@@ -100,6 +107,9 @@ func run(logger *slog.Logger) error {
 	defer stop()
 	if exportWorker != nil {
 		go exportWorker.Run(ctx)
+	}
+	if visualWorker != nil {
+		go visualWorker.Run(ctx)
 	}
 	logger.Info("service starting", "address", cfg.HTTPAddr, "environment", cfg.Environment)
 	if err := lifecycle.Run(ctx, lifecycle.Config{

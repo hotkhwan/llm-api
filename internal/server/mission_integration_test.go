@@ -61,6 +61,16 @@ func TestMissionHTTPFlow(t *testing.T) {
 	if got.State != mission.StateNextMissionReady || got.NextAction == nil {
 		t.Fatalf("outcome mission=%#v", got)
 	}
+	response = missionRequest(t, app, "PUT", "/v1/missions/mission-http-1/visual-qc/override", "application/json", []byte(`{"decision":"accept","reason":"ตรวจวิดีโอด้วยตนเองแล้ว"}`))
+	if response.StatusCode != 200 {
+		t.Fatalf("visual QC override status = %d", response.StatusCode)
+	}
+	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.VisualQC == nil || got.VisualQC.ManualOverride == nil || got.VisualQC.ManualOverride.By != "u1" {
+		t.Fatalf("visual QC override mission=%#v", got)
+	}
 }
 
 func TestMissionRequiresAuthenticatedIdentity(t *testing.T) {

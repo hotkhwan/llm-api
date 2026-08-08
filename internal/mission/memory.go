@@ -86,6 +86,38 @@ func cloneMission(value Mission) Mission {
 		copy := *value.NextAction
 		value.NextAction = &copy
 	}
+	if value.VisualQC != nil {
+		copy := *value.VisualQC
+		copy.History = append([]VisualQCReport(nil), copy.History...)
+		if copy.Job != nil {
+			job := *copy.Job
+			copy.Job = &job
+		}
+		if copy.LatestReport != nil {
+			report := cloneVisualQCReport(*copy.LatestReport)
+			copy.LatestReport = &report
+		}
+		for index := range copy.History {
+			copy.History[index] = cloneVisualQCReport(copy.History[index])
+		}
+		if copy.ManualOverride != nil {
+			override := *copy.ManualOverride
+			copy.ManualOverride = &override
+		}
+		value.VisualQC = &copy
+	}
+	return value
+}
+
+func cloneVisualQCReport(value VisualQCReport) VisualQCReport {
+	value.EvidenceFrames = append([]EvidenceFrame(nil), value.EvidenceFrames...)
+	value.Shots = append([]VisualQCShot(nil), value.Shots...)
+	for index := range value.Shots {
+		value.Shots[index].Defects = append([]VisualQCDefect(nil), value.Shots[index].Defects...)
+		for defect := range value.Shots[index].Defects {
+			value.Shots[index].Defects[defect].EvidenceFrameIDs = append([]string(nil), value.Shots[index].Defects[defect].EvidenceFrameIDs...)
+		}
+	}
 	return value
 }
 

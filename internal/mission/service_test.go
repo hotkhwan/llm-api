@@ -229,6 +229,16 @@ func (signingMemoryStore) DownloadURL(context.Context, string, time.Duration) (s
 	return "https://s3.example/download", nil
 }
 
+type completedVisualQueue struct{ report VisualQCReport }
+
+func (q completedVisualQueue) EnqueueVisualQC(context.Context, VisualQCRequest) (ProcessingJob, error) {
+	return ProcessingJob{ID: "vj", Kind: "visualQc", State: JobSucceeded}, nil
+}
+func (q completedVisualQueue) GetVisualQC(context.Context, string) (ProcessingJob, *VisualQCReport, error) {
+	report := q.report
+	return ProcessingJob{ID: "vj", Kind: "visualQc", State: JobSucceeded}, &report, nil
+}
+
 func TestGetReconcilesCompletedExportAndRenewsDownloadURL(t *testing.T) {
 	repo := NewMemoryRepository()
 	now := time.Date(2026, 8, 9, 1, 0, 0, 0, time.UTC)
@@ -246,6 +256,39 @@ func TestGetReconcilesCompletedExportAndRenewsDownloadURL(t *testing.T) {
 	got, err = service.Get(context.Background(), m.ID)
 	if err != nil || got.Version != version || got.Export.DownloadURL == "" {
 		t.Fatalf("renew mission=%#v err=%v", got, err)
+	}
+}
+
+func TestVisualQCManualOverrideDoesNotBlockPostedExport(t *testing.T) {
+	repo := NewMemoryRepository()
+	now := time.Date(2026, 8, 9, 3, 0, 0, 0, time.UTC)
+	m := Mission{ID: "m1", UserID: "u", State: StateExported, Version: 1, Export: &Export{StorageKey: "video"}, ExportJob: &ProcessingJob{ID: "e1", State: JobSucceeded}, CreatedAt: now, UpdatedAt: now}
+	if err := repo.Create(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	service := NewServiceWithOptions(repo, MemoryObjectStore{}, CaptionBackedPlanner{}, NewMemoryJobQueue(func() time.Time { return now }, func() string { return "id" }), nil, &MemoryLedger{}, func() time.Time { return now }, func() string { return "id" }, 1024)
+	got, err := service.OverrideVisualQC(context.Background(), m.ID, "u", "accept", "ตรวจวิดีโอด้วยตนเองแล้ว")
+	if err != nil || got.State != StateExported || got.VisualQC == nil || got.VisualQC.ManualOverride == nil || got.VisualQC.ManualOverride.Decision != "accept" {
+		t.Fatalf("mission=%#v err=%v", got, err)
+	}
+	got, err = service.MarkPosted(context.Background(), m.ID, "tiktok", "")
+	if err != nil || got.State != StatePosted {
+		t.Fatalf("posted mission=%#v err=%v", got, err)
+	}
+}
+
+func TestPostedMissionReconcilesVisualQCAndRenewsDownloadURL(t *testing.T) {
+	repo := NewMemoryRepository()
+	now := time.Date(2026, 8, 9, 4, 0, 0, 0, time.UTC)
+	report := VisualQCReport{Revision: 1, ModelRevision: "shotvl-rev", Score: .8, Threshold: .75, Passed: true, CreatedAt: now}
+	m := Mission{ID: "m1", UserID: "u", State: StatePosted, Version: 1, Export: &Export{StorageKey: "video"}, ExportJob: &ProcessingJob{ID: "e1", State: JobSucceeded}, VisualQC: &VisualQCState{Job: &ProcessingJob{ID: "vj", Kind: "visualQc", State: JobQueued}, History: []VisualQCReport{}}, CreatedAt: now, UpdatedAt: now}
+	if err := repo.Create(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	service := NewServiceWithOptions(repo, signingMemoryStore{}, CaptionBackedPlanner{}, NewMemoryJobQueue(func() time.Time { return now }, func() string { return "id" }), completedVisualQueue{report: report}, &MemoryLedger{}, func() time.Time { return now }, func() string { return "id" }, 1024)
+	got, err := service.Get(context.Background(), m.ID)
+	if err != nil || got.State != StatePosted || got.Export.DownloadURL == "" || got.VisualQC.LatestReport == nil || len(got.VisualQC.History) != 1 {
+		t.Fatalf("mission=%#v err=%v", got, err)
 	}
 }
 

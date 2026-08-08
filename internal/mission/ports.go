@@ -111,6 +111,7 @@ type VisualQCRequest struct {
 	IdempotencyKey string
 	VideoKey       string
 	Spec           ProductionSpec
+	Revision       int
 }
 
 // VisualQCQueue is deliberately optional and load-on-demand. A ShotVL worker
@@ -118,6 +119,24 @@ type VisualQCRequest struct {
 // depend on ShotVL being resident or available.
 type VisualQCQueue interface {
 	EnqueueVisualQC(context.Context, VisualQCRequest) (ProcessingJob, error)
+	GetVisualQC(context.Context, string) (ProcessingJob, *VisualQCReport, error)
+}
+
+type VisualQCJobStore interface {
+	EnqueueVisualQCJob(context.Context, VisualQCRequest) (ProcessingJob, error)
+	ClaimNextVisualQC(context.Context, string, time.Time, time.Time) (ProcessingJob, VisualQCRequest, bool, error)
+	CompleteVisualQC(context.Context, string, string, VisualQCReport, time.Time) (ProcessingJob, error)
+	FailVisualQC(context.Context, string, string, string, time.Time) error
+	GetVisualQCJob(context.Context, string) (ProcessingJob, *VisualQCReport, error)
+}
+
+type VisualQCFrame struct {
+	Evidence EvidenceFrame
+	JPEG     []byte
+}
+
+type VisualQCAnalyzer interface {
+	Analyze(context.Context, ProductionSpec, []VisualQCFrame, int) (VisualQCReport, error)
 }
 
 type AuditSink interface {

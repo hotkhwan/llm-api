@@ -45,6 +45,11 @@ type Config struct {
 	OIDCIssuer                 string
 	OIDCAudience               string
 	AllowTrustedIdentityHeader bool
+	ShotVLURL                  string
+	ShotVLModel                string
+	ShotVLModelRevision        string
+	ShotVLAPIKey               string
+	ShotVLThreshold            float64
 }
 
 type LookupEnv func(string) string
@@ -77,6 +82,11 @@ func Load(lookup LookupEnv) (Config, error) {
 		OIDCIssuer:                 strings.TrimRight(strings.TrimSpace(lookup("OIDC_ISSUER")), "/"),
 		OIDCAudience:               strings.TrimSpace(lookup("OIDC_AUDIENCE")),
 		AllowTrustedIdentityHeader: strings.EqualFold(strings.TrimSpace(lookup("ALLOW_TRUSTED_IDENTITY_HEADER")), "true"),
+		ShotVLURL:                  strings.TrimSpace(lookup("SHOTVL_URL")),
+		ShotVLModel:                valueOrDefault(lookup("SHOTVL_MODEL"), "ShotVL-7B"),
+		ShotVLModelRevision:        valueOrDefault(lookup("SHOTVL_MODEL_REVISION"), "unversioned"),
+		ShotVLAPIKey:               strings.TrimSpace(lookup("SHOTVL_API_KEY")),
+		ShotVLThreshold:            0.75,
 	}
 
 	if !isEnvironment(cfg.Environment) {
@@ -117,6 +127,22 @@ func Load(lookup LookupEnv) (Config, error) {
 			return Config{}, fmt.Errorf("LOCAL_LLM_URL must be an absolute http(s) URL")
 		}
 	}
+	if raw := strings.TrimSpace(lookup("SHOTVL_THRESHOLD")); raw != "" {
+		value, parseErr := strconv.ParseFloat(raw, 64)
+		if parseErr != nil || value < 0 || value > 1 {
+			return Config{}, fmt.Errorf("SHOTVL_THRESHOLD must be between 0 and 1")
+		}
+		cfg.ShotVLThreshold = value
+	}
+	if cfg.ShotVLURL != "" {
+		parsed, parseErr := url.Parse(cfg.ShotVLURL)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+			return Config{}, fmt.Errorf("SHOTVL_URL must be an absolute credential-free http(s) URL")
+		}
+		if cfg.ShotVLModelRevision == "unversioned" {
+			return Config{}, fmt.Errorf("SHOTVL_MODEL_REVISION must be immutable when ShotVL is enabled")
+		}
+	}
 	if cfg.BasePath != "" && (!strings.HasPrefix(cfg.BasePath, "/") || strings.Contains(cfg.BasePath, "..") || strings.ContainsAny(cfg.BasePath, "?#")) {
 		return Config{}, fmt.Errorf("APP_BASE_PATH must be an absolute clean URL path")
 	}
@@ -132,6 +158,9 @@ func Load(lookup LookupEnv) (Config, error) {
 	}
 	if cfg.Environment == "production" && durableCount != len(durableValues) {
 		return Config{}, fmt.Errorf("production requires MongoDB and SeaweedFS S3 configuration")
+	}
+	if cfg.ShotVLURL != "" && durableCount != len(durableValues) {
+		return Config{}, fmt.Errorf("SHOTVL_URL requires durable MongoDB and SeaweedFS configuration")
 	}
 	if cfg.Environment == "production" && cfg.S3PublicEndpoint == "" {
 		return Config{}, fmt.Errorf("production requires S3_PRESIGN_ENDPOINT or S3_PUBLIC_BASE_URL for browser-safe signed downloads")

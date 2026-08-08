@@ -36,6 +36,34 @@ func (h *HTTPHandler) Register(router fiber.Router) {
 	router.Post("/missions/:id/export", h.export)
 	router.Post("/missions/:id/posted", h.posted)
 	router.Put("/missions/:id/outcome", h.outcome)
+	router.Post("/missions/:id/visual-qc", h.visualQC)
+	router.Put("/missions/:id/visual-qc/override", h.visualQCOverride)
+}
+
+func (h *HTTPHandler) visualQC(c *fiber.Ctx) error {
+	result, err := h.service.EnqueueVisualQC(c.UserContext(), c.Params("id"))
+	if err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(result)
+}
+
+type visualQCOverrideRequest struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason"`
+}
+
+func (h *HTTPHandler) visualQCOverride(c *fiber.Ctx) error {
+	var request visualQCOverrideRequest
+	if err := c.BodyParser(&request); err != nil {
+		return apiError(c, fiber.StatusBadRequest, "invalid_json", "request must be valid JSON")
+	}
+	userID, _ := c.Locals("authenticatedUserID").(string)
+	result, err := h.service.OverrideVisualQC(c.UserContext(), c.Params("id"), userID, request.Decision, request.Reason)
+	if err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(result)
 }
 
 func (h *HTTPHandler) authenticate(c *fiber.Ctx) error {

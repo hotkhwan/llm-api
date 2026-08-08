@@ -143,6 +143,38 @@ paths:
       responses:
         '200': { description: Outcome and next action recorded }
         '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/visual-qc:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: enqueueVisualQC
+      summary: Enqueue or retry advisory ShotVL review after verified export
+      description: Never blocks download or posting. Poll the mission resource for job/report changes.
+      responses:
+        '200': { description: Advisory review queued or existing job returned }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/visual-qc/override:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    put:
+      operationId: overrideVisualQC
+      summary: Record the authenticated user's manual advisory decision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [accept, reject] }
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200': { description: Manual override recorded without changing export/post availability }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
 components:
   securitySchemes:
     bearerAuth:
@@ -204,6 +236,7 @@ components:
         posted: { type: object }
         outcome: { $ref: '#/components/schemas/Outcome' }
         nextAction: { $ref: '#/components/schemas/NextAction' }
+        visualQc: { $ref: '#/components/schemas/VisualQCState' }
         version: { type: integer, format: int64 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -300,7 +333,7 @@ components:
       required: [id, kind, state, attempt, idempotencyKey, updatedAt]
       properties:
         id: { type: string }
-        kind: { type: string, const: ffmpegExport }
+        kind: { type: string, enum: [ffmpegExport, visualQc] }
         state: { type: string, enum: [queued, running, succeeded, failed] }
         attempt: { type: integer, minimum: 0, maximum: 3 }
         idempotencyKey: { type: string }
@@ -331,3 +364,76 @@ components:
         kind: { type: string, enum: [repeat, improveCTA, retryHook] }
         title: { type: string }
         reason: { type: string }
+    VisualQCState:
+      type: object
+      required: [history]
+      description: Advisory only; absence/failure never blocks export download or posting.
+      properties:
+        job: { $ref: '#/components/schemas/ProcessingJob' }
+        latestReport: { $ref: '#/components/schemas/VisualQCReport' }
+        history:
+          type: array
+          items: { $ref: '#/components/schemas/VisualQCReport' }
+        warning: { type: string }
+        manualOverride: { $ref: '#/components/schemas/VisualQCOverride' }
+    VisualQCReport:
+      type: object
+      required: [revision, modelRevision, threshold, score, passed, evidenceFrames, shots, createdAt]
+      properties:
+        revision: { type: integer, minimum: 1 }
+        modelRevision: { type: string, minLength: 1 }
+        threshold: { type: number, minimum: 0, maximum: 1 }
+        score: { type: number, minimum: 0, maximum: 1 }
+        passed: { type: boolean }
+        evidenceFrames:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: { $ref: '#/components/schemas/EvidenceFrame' }
+        shots:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: '#/components/schemas/VisualQCShot' }
+        createdAt: { type: string, format: date-time }
+    EvidenceFrame:
+      type: object
+      required: [id, storageKey, timestampMs]
+      properties:
+        id: { type: string }
+        storageKey: { type: string }
+        timestampMs: { type: integer, minimum: 0 }
+    VisualQCShot:
+      type: object
+      required: [shotId, metrics]
+      properties:
+        shotId: { type: string }
+        metrics:
+          type: object
+          required: [shotSize, composition, cameraAngle, depth, lighting, subjectPlacement, productPlacement]
+          properties:
+            shotSize: { type: number, minimum: 0, maximum: 1 }
+            composition: { type: number, minimum: 0, maximum: 1 }
+            cameraAngle: { type: number, minimum: 0, maximum: 1 }
+            depth: { type: number, minimum: 0, maximum: 1 }
+            lighting: { type: number, minimum: 0, maximum: 1 }
+            subjectPlacement: { type: number, minimum: 0, maximum: 1 }
+            productPlacement: { type: number, minimum: 0, maximum: 1 }
+        defects:
+          type: array
+          items:
+            type: object
+            required: [code, severity, message, evidenceFrameIds]
+            properties:
+              code: { type: string }
+              severity: { type: string, enum: [info, warning, critical] }
+              message: { type: string }
+              evidenceFrameIds: { type: array, items: { type: string } }
+    VisualQCOverride:
+      type: object
+      required: [decision, reason, by, at]
+      properties:
+        decision: { type: string, enum: [accept, reject] }
+        reason: { type: string }
+        by: { type: string }
+        at: { type: string, format: date-time }

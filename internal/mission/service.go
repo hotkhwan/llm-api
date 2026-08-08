@@ -67,7 +67,10 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 	if err != nil {
 		return Mission{}, err
 	}
-	if m.State == StateExported && m.Export != nil {
+	if isPostExportState(m.State) && m.Export != nil {
+		if err := s.reconcileVisualQC(ctx, &m); err != nil {
+			m.VisualQC = visualQCWarning(m.VisualQC, "Visual QC unavailable; review the exported video manually")
+		}
 		m.Export.DownloadURL = s.downloadURL(ctx, m.Export.StorageKey)
 		return m, nil
 	}
@@ -83,19 +86,24 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 	if status.State == JobSucceeded {
 		from := m.State
 		m.State = StateExported
-		m.Export.DownloadURL = s.downloadURL(ctx, m.Export.StorageKey)
+		s.enqueueVisualQC(ctx, &m)
 		if err := s.save(ctx, &m); err != nil {
 			return Mission{}, err
 		}
 		if err := s.audit(ctx, m.ID, "post.exported", from, m.State); err != nil {
 			return Mission{}, err
 		}
+		m.Export.DownloadURL = s.downloadURL(ctx, m.Export.StorageKey)
 	} else if status.State != previous {
 		if err := s.save(ctx, &m); err != nil {
 			return Mission{}, err
 		}
 	}
 	return m, nil
+}
+
+func isPostExportState(state State) bool {
+	return state == StateExported || state == StatePosted || state == StateResultRecorded || state == StateNextMissionReady
 }
 
 func (s *Service) Upload(ctx context.Context, id string, shot int, contentType string, body []byte) (Mission, error) {
@@ -309,13 +317,14 @@ func (s *Service) Export(ctx context.Context, id string) (Mission, error) {
 		m.ExportJob = &status
 		if status.State == JobSucceeded {
 			m.State = StateExported
-			m.Export.DownloadURL = s.downloadURL(ctx, outputKey)
+			s.enqueueVisualQC(ctx, &m)
 			if err := s.save(ctx, &m); err != nil {
 				return Mission{}, err
 			}
 			if err := s.audit(ctx, m.ID, "post.exported", from, m.State); err != nil {
 				return Mission{}, err
 			}
+			m.Export.DownloadURL = s.downloadURL(ctx, outputKey)
 			return m, nil
 		}
 		if status.State != JobFailed {
@@ -331,7 +340,7 @@ func (s *Service) Export(ctx context.Context, id string) (Mission, error) {
 	m.State = StateExportQueued
 	if job.State == JobSucceeded {
 		m.State = StateExported
-		m.Export.DownloadURL = s.downloadURL(ctx, outputKey)
+		s.enqueueVisualQC(ctx, &m)
 	}
 	if err := s.save(ctx, &m); err != nil {
 		return Mission{}, err
@@ -343,7 +352,126 @@ func (s *Service) Export(ctx context.Context, id string) (Mission, error) {
 	if err := s.audit(ctx, m.ID, action, from, m.State); err != nil {
 		return Mission{}, err
 	}
+	if m.State == StateExported {
+		m.Export.DownloadURL = s.downloadURL(ctx, outputKey)
+	}
 	return m, nil
+}
+
+func (s *Service) EnqueueVisualQC(ctx context.Context, id string) (Mission, error) {
+	m, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Mission{}, err
+	}
+	if m.State != StateExported && m.State != StatePosted && m.State != StateResultRecorded && m.State != StateNextMissionReady {
+		return Mission{}, ErrInvalidState
+	}
+	_ = s.reconcileVisualQC(ctx, &m)
+	if m.VisualQC != nil && m.VisualQC.Job != nil {
+		if m.VisualQC.Job.State == JobQueued || m.VisualQC.Job.State == JobRunning {
+			return m, nil
+		}
+		m.VisualQC.Job = nil
+	}
+	before := m.Version
+	s.enqueueVisualQC(ctx, &m)
+	if m.Version == before {
+		if err := s.save(ctx, &m); err != nil {
+			return Mission{}, err
+		}
+	}
+	return m, nil
+}
+
+func (s *Service) OverrideVisualQC(ctx context.Context, id, userID, decision, reason string) (Mission, error) {
+	decision = strings.TrimSpace(decision)
+	reason = strings.TrimSpace(reason)
+	if decision != "accept" && decision != "reject" {
+		return Mission{}, fmt.Errorf("visual QC override decision must be accept or reject")
+	}
+	if reason == "" || len([]rune(reason)) > 500 {
+		return Mission{}, fmt.Errorf("visual QC override reason is required and must not exceed 500 characters")
+	}
+	m, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Mission{}, err
+	}
+	if m.State != StateExported && m.State != StatePosted && m.State != StateResultRecorded && m.State != StateNextMissionReady {
+		return Mission{}, ErrInvalidState
+	}
+	if m.VisualQC == nil {
+		m.VisualQC = &VisualQCState{}
+	}
+	if existing := m.VisualQC.ManualOverride; existing != nil && existing.Decision == decision && existing.Reason == reason && existing.By == userID {
+		return m, nil
+	}
+	m.VisualQC.ManualOverride = &VisualQCOverride{Decision: decision, Reason: reason, By: userID, At: s.now().UTC()}
+	if err := s.save(ctx, &m); err != nil {
+		return Mission{}, err
+	}
+	if err := s.audit(ctx, m.ID, "visualQc.overridden", m.State, m.State); err != nil {
+		return Mission{}, err
+	}
+	return m, nil
+}
+
+func (s *Service) enqueueVisualQC(ctx context.Context, m *Mission) {
+	if m.VisualQC == nil {
+		m.VisualQC = &VisualQCState{History: []VisualQCReport{}}
+	}
+	if s.visualQC == nil {
+		m.VisualQC.Warning = "Visual QC is not configured; review the exported video manually"
+		return
+	}
+	if m.VisualQC.Job != nil && (m.VisualQC.Job.State == JobQueued || m.VisualQC.Job.State == JobRunning || m.VisualQC.Job.State == JobSucceeded) {
+		return
+	}
+	revision := len(m.VisualQC.History) + 1
+	key := fmt.Sprintf("visual-qc:%s:%s:%d", m.ID, m.ExportJob.ID, revision)
+	job, err := s.visualQC.EnqueueVisualQC(ctx, VisualQCRequest{MissionID: m.ID, IdempotencyKey: key, VideoKey: m.Export.StorageKey, Spec: m.Draft.ProductionSpec, Revision: revision})
+	if err != nil {
+		m.VisualQC.Warning = "Visual QC could not be queued; review the exported video manually"
+		return
+	}
+	m.VisualQC.Job = &job
+	m.VisualQC.Warning = "Visual QC is advisory and still processing; the export remains available"
+}
+
+func (s *Service) reconcileVisualQC(ctx context.Context, m *Mission) error {
+	if m.VisualQC == nil || m.VisualQC.Job == nil || s.visualQC == nil {
+		return nil
+	}
+	job, report, err := s.visualQC.GetVisualQC(ctx, m.VisualQC.Job.ID)
+	if err != nil {
+		return err
+	}
+	changed := job.State != m.VisualQC.Job.State
+	m.VisualQC.Job = &job
+	switch job.State {
+	case JobSucceeded:
+		if report != nil && (m.VisualQC.LatestReport == nil || m.VisualQC.LatestReport.Revision != report.Revision) {
+			m.VisualQC.History = append(m.VisualQC.History, *report)
+			m.VisualQC.LatestReport = report
+			changed = true
+		}
+		m.VisualQC.Warning = ""
+	case JobFailed:
+		m.VisualQC.Warning = "Visual QC failed; review the exported video manually or retry"
+	case JobQueued, JobRunning:
+		m.VisualQC.Warning = "Visual QC is advisory and still processing; the export remains available"
+	}
+	if changed {
+		return s.save(ctx, m)
+	}
+	return nil
+}
+
+func visualQCWarning(state *VisualQCState, warning string) *VisualQCState {
+	if state == nil {
+		state = &VisualQCState{History: []VisualQCReport{}}
+	}
+	state.Warning = warning
+	return state
 }
 
 func (s *Service) downloadURL(ctx context.Context, key string) string {

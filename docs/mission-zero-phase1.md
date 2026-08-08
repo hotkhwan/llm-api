@@ -17,8 +17,12 @@ character, wardrobe, makeup, location, lighting and camera continuity bibles.
 
 The deterministic planner is a fail-safe when Qwen is absent, slow or emits an
 invalid/unsafe schema. It still produces a complete CPS from verified facts.
-ShotVL is an optional `VisualQCQueue`, loaded on demand after keyframe
-extraction. It is not resident and never blocks First Mission or First Post.
+ShotVL is an optional `VisualQCQueue`, loaded on demand after deterministic
+FFmpeg keyframe extraction. MongoDB enforces one global leased visual job at a
+time. It is not resident and never blocks First Mission, download, or First
+Post; failures produce a visible manual-review warning and users can record an
+accept/reject override with a reason. Reports retain model revision, threshold,
+per-shot metrics/defects, cited evidence-frame IDs and prior revisions.
 
 ## Durable runtime
 
@@ -60,7 +64,10 @@ creating duplicate artifacts.
 ## Deferred beyond Mission Zero
 
 - Autonomous publishing, marketplace, wallet and cross-platform trend crawl.
-- A resident VLM. ShotVL remains advisory/load-on-demand until its benchmark
-  and operational envelope pass.
+- A resident VLM. The ShotVL endpoint/model is installed and scheduled outside
+  this application. Its scheduler must unload/pause ShotVL while the primary
+  Qwen interactive queue is active and must not make both models resident or
+  generate concurrently on DGX Spark. This API only enforces visual queue
+  concurrency one; it does not install models or own the GPU scheduler.
 - The 35B challenger. Qwen3.6-27B-Q8_0-MTP-16K remains primary until blind
   production-spec evaluation shows a material quality gain.

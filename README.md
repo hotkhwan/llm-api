@@ -8,6 +8,8 @@ implements the first durable end-to-end Mission Zero slice:
 MongoDB, SeaweedFS S3, a restart-safe leased FFmpeg worker, OIDC ownership,
 Qwen role planning and Canonical Production Spec v1 are included; see
 [Mission Zero backend](docs/mission-zero-phase1.md).
+Optional MZ-3 ShotVL visual QC is advisory, globally serialized through MongoDB,
+and fail-open with evidence, history, visible warnings and manual override.
 
 ## Local checks
 
@@ -44,6 +46,8 @@ Copy `.env.example` values into your process environment and run `go run ./cmd/a
 - `POST /v1/missions/{id}/export`
 - `POST /v1/missions/{id}/posted`
 - `PUT /v1/missions/{id}/outcome`
+- `POST /v1/missions/{id}/visual-qc`
+- `PUT /v1/missions/{id}/visual-qc/override`
 
 The local LLM is optional. If it is unavailable or returns invalid structured
 output, the API uses a deterministic Thai plan so First Mission remains usable.
