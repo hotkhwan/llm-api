@@ -5,6 +5,11 @@ KDeploy. Applying it creates a private ClusterIP and a zero-replica Deployment;
 it does not make ShotVL resident and does not add an Ingress, Gateway API route,
 NodePort, or LoadBalancer.
 
+ShotVL is an advisory cinematography critic (shot size, framing, angle, lens,
+lighting, composition, and movement). It is not evidence that product text,
+logos, colors, or geometry are exact, so product fidelity still requires the
+canonical product bible and human review.
+
 ## Immutable inputs
 
 - Model: `Vchitect/ShotVL-7B`
