@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -15,11 +16,12 @@ import (
 
 func testOptions() Options {
 	return Options{
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-		BodyLimit:    1 << 20,
-		Concurrency:  1024,
+		ReadTimeout:                5 * time.Second,
+		WriteTimeout:               15 * time.Second,
+		IdleTimeout:                60 * time.Second,
+		BodyLimit:                  1 << 20,
+		Concurrency:                1024,
+		AllowTrustedIdentityHeader: true,
 		RequestID: func() (string, error) {
 			return "generated-request-id", nil
 		},
@@ -70,6 +72,28 @@ func TestLifecycleAndVersionEndpoints(t *testing.T) {
 	}
 	if got.Version != "1.2.3" || got.Commit != "abc123" {
 		t.Fatalf("unexpected version payload: %#v", got)
+	}
+}
+
+func TestBasePathRoutesHealthAndMissionAPI(t *testing.T) {
+	options := testOptions()
+	options.BasePath = "/dev/llm-api"
+	app := New(slog.Default(), buildinfo.Static{}, NewReadiness(), options)
+	request := httptest.NewRequest(http.MethodGet, "/dev/llm-api/healthz", nil)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("base path status=%d", response.StatusCode)
+	}
+	request = httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	response, err = app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusNotFound {
+		t.Fatalf("root status=%d", response.StatusCode)
 	}
 }
 

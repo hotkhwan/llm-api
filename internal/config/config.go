@@ -14,23 +14,37 @@ const (
 	defaultEnvironment     = "development"
 	defaultShutdownTimeout = 10 * time.Second
 	defaultReadTimeout     = 5 * time.Second
-	defaultWriteTimeout    = 15 * time.Second
+	defaultWriteTimeout    = 60 * time.Second
 	defaultIdleTimeout     = 60 * time.Second
-	defaultBodyLimit       = 1 << 20
+	defaultBodyLimit       = 64 << 20
 	defaultConcurrency     = 1024
 )
 
 type Config struct {
-	Environment     string
-	HTTPAddr        string
-	ShutdownTimeout time.Duration
-	ReadTimeout     time.Duration
-	WriteTimeout    time.Duration
-	IdleTimeout     time.Duration
-	BodyLimit       int
-	Concurrency     int
-	LocalLLMURL     string
-	LocalLLMModel   string
+	Environment                string
+	HTTPAddr                   string
+	ShutdownTimeout            time.Duration
+	ReadTimeout                time.Duration
+	WriteTimeout               time.Duration
+	IdleTimeout                time.Duration
+	BodyLimit                  int
+	Concurrency                int
+	BasePath                   string
+	LocalLLMURL                string
+	LocalLLMModel              string
+	LocalLLMAPIKey             string
+	MongoURI                   string
+	MongoDatabase              string
+	S3Endpoint                 string
+	S3PublicEndpoint           string
+	S3Region                   string
+	S3Bucket                   string
+	S3Prefix                   string
+	S3AccessKey                string
+	S3SecretKey                string
+	OIDCIssuer                 string
+	OIDCAudience               string
+	AllowTrustedIdentityHeader bool
 }
 
 type LookupEnv func(string) string
@@ -39,16 +53,30 @@ type LookupEnv func(string) string
 // future integrations through a documented secret provider, never this config.
 func Load(lookup LookupEnv) (Config, error) {
 	cfg := Config{
-		Environment:     valueOrDefault(lookup("APP_ENV"), defaultEnvironment),
-		HTTPAddr:        valueOrDefault(lookup("HTTP_ADDR"), defaultHTTPAddr),
-		ShutdownTimeout: defaultShutdownTimeout,
-		ReadTimeout:     defaultReadTimeout,
-		WriteTimeout:    defaultWriteTimeout,
-		IdleTimeout:     defaultIdleTimeout,
-		BodyLimit:       defaultBodyLimit,
-		Concurrency:     defaultConcurrency,
-		LocalLLMURL:     strings.TrimSpace(lookup("LOCAL_LLM_URL")),
-		LocalLLMModel:   valueOrDefault(lookup("LOCAL_LLM_MODEL"), "Qwen3.6-27B-MTP-GGUF"),
+		Environment:                valueOrDefault(lookup("APP_ENV"), defaultEnvironment),
+		HTTPAddr:                   valueOrDefault(lookup("HTTP_ADDR"), defaultHTTPAddr),
+		ShutdownTimeout:            defaultShutdownTimeout,
+		ReadTimeout:                defaultReadTimeout,
+		WriteTimeout:               defaultWriteTimeout,
+		IdleTimeout:                defaultIdleTimeout,
+		BodyLimit:                  defaultBodyLimit,
+		Concurrency:                defaultConcurrency,
+		BasePath:                   strings.TrimRight(strings.TrimSpace(lookup("APP_BASE_PATH")), "/"),
+		LocalLLMURL:                strings.TrimSpace(lookup("LOCAL_LLM_URL")),
+		LocalLLMModel:              valueOrDefault(lookup("LOCAL_LLM_MODEL"), "qwen3.6-27b-q8_0-mtp-16k"),
+		LocalLLMAPIKey:             strings.TrimSpace(lookup("LOCAL_LLM_API_KEY")),
+		MongoURI:                   strings.TrimSpace(lookup("MONGO_URI")),
+		MongoDatabase:              valueOrDefault(lookup("MONGO_DATABASE"), "kwanni"),
+		S3Endpoint:                 strings.TrimSpace(lookup("S3_ENDPOINT")),
+		S3PublicEndpoint:           valueOrDefault(lookup("S3_PRESIGN_ENDPOINT"), strings.TrimSpace(lookup("S3_PUBLIC_BASE_URL"))),
+		S3Region:                   valueOrDefault(lookup("S3_REGION"), "us-east-1"),
+		S3Bucket:                   valueOrDefault(lookup("S3_BUCKET"), "llm-api"),
+		S3Prefix:                   valueOrDefault(lookup("S3_PREFIX"), "mission-zero"),
+		S3AccessKey:                strings.TrimSpace(lookup("S3_ACCESS_KEY")),
+		S3SecretKey:                strings.TrimSpace(lookup("S3_SECRET_KEY")),
+		OIDCIssuer:                 strings.TrimRight(strings.TrimSpace(lookup("OIDC_ISSUER")), "/"),
+		OIDCAudience:               strings.TrimSpace(lookup("OIDC_AUDIENCE")),
+		AllowTrustedIdentityHeader: strings.EqualFold(strings.TrimSpace(lookup("ALLOW_TRUSTED_IDENTITY_HEADER")), "true"),
 	}
 
 	if !isEnvironment(cfg.Environment) {
@@ -77,7 +105,7 @@ func Load(lookup LookupEnv) (Config, error) {
 	if cfg.IdleTimeout < cfg.ReadTimeout {
 		return Config{}, fmt.Errorf("HTTP_IDLE_TIMEOUT must be greater than or equal to HTTP_READ_TIMEOUT")
 	}
-	if cfg.BodyLimit, err = intSetting(lookup, "HTTP_BODY_LIMIT_BYTES", cfg.BodyLimit, 1024, 8<<20); err != nil {
+	if cfg.BodyLimit, err = intSetting(lookup, "HTTP_BODY_LIMIT_BYTES", cfg.BodyLimit, 1024, 256<<20); err != nil {
 		return Config{}, err
 	}
 	if cfg.Concurrency, err = intSetting(lookup, "HTTP_CONCURRENCY", cfg.Concurrency, 64, 8192); err != nil {
@@ -88,6 +116,43 @@ func Load(lookup LookupEnv) (Config, error) {
 		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
 			return Config{}, fmt.Errorf("LOCAL_LLM_URL must be an absolute http(s) URL")
 		}
+	}
+	if cfg.BasePath != "" && (!strings.HasPrefix(cfg.BasePath, "/") || strings.Contains(cfg.BasePath, "..") || strings.ContainsAny(cfg.BasePath, "?#")) {
+		return Config{}, fmt.Errorf("APP_BASE_PATH must be an absolute clean URL path")
+	}
+	durableValues := []string{cfg.MongoURI, cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey}
+	durableCount := 0
+	for _, value := range durableValues {
+		if value != "" {
+			durableCount++
+		}
+	}
+	if durableCount != 0 && durableCount != len(durableValues) {
+		return Config{}, fmt.Errorf("MONGO_URI, S3_ENDPOINT, S3_ACCESS_KEY and S3_SECRET_KEY must be configured together")
+	}
+	if cfg.Environment == "production" && durableCount != len(durableValues) {
+		return Config{}, fmt.Errorf("production requires MongoDB and SeaweedFS S3 configuration")
+	}
+	if cfg.Environment == "production" && cfg.S3PublicEndpoint == "" {
+		return Config{}, fmt.Errorf("production requires S3_PRESIGN_ENDPOINT or S3_PUBLIC_BASE_URL for browser-safe signed downloads")
+	}
+	for key, value := range map[string]string{"S3_ENDPOINT": cfg.S3Endpoint, "S3_PRESIGN_ENDPOINT": cfg.S3PublicEndpoint} {
+		if value == "" {
+			continue
+		}
+		parsed, parseErr := url.Parse(value)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+			return Config{}, fmt.Errorf("%s must be an absolute credential-free http(s) URL", key)
+		}
+	}
+	if cfg.Environment == "production" && !strings.HasPrefix(cfg.S3PublicEndpoint, "https://") {
+		return Config{}, fmt.Errorf("production S3 presign endpoint must use https")
+	}
+	if (cfg.OIDCIssuer == "") != (cfg.OIDCAudience == "") {
+		return Config{}, fmt.Errorf("OIDC_ISSUER and OIDC_AUDIENCE must be configured together")
+	}
+	if cfg.Environment == "production" && (cfg.OIDCIssuer == "" || cfg.AllowTrustedIdentityHeader) {
+		return Config{}, fmt.Errorf("production requires OIDC bearer verification and forbids trusted identity headers")
 	}
 
 	return cfg, nil

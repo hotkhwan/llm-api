@@ -21,13 +21,16 @@ var validRequestID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 type RequestIDGenerator func() (string, error)
 
 type Options struct {
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
-	BodyLimit    int
-	Concurrency  int
-	RequestID    RequestIDGenerator
-	Mission      *mission.Service
+	ReadTimeout                time.Duration
+	WriteTimeout               time.Duration
+	IdleTimeout                time.Duration
+	BodyLimit                  int
+	Concurrency                int
+	RequestID                  RequestIDGenerator
+	Mission                    *mission.Service
+	BasePath                   string
+	MissionIdentity            mission.IdentityVerifier
+	AllowTrustedIdentityHeader bool
 }
 
 type Readiness struct {
@@ -57,20 +60,21 @@ func New(logger *slog.Logger, metadata buildinfo.Provider, readiness *Readiness,
 	})
 	app.Use(requestLogger(logger, options.RequestID))
 
-	app.Get("/healthz", func(c *fiber.Ctx) error {
+	root := app.Group(options.BasePath)
+	root.Get("/healthz", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
-	app.Get("/readyz", func(c *fiber.Ctx) error {
+	root.Get("/readyz", func(c *fiber.Ctx) error {
 		if !readiness.ready.Load() {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "not_ready"})
 		}
 		return c.JSON(fiber.Map{"status": "ready"})
 	})
-	app.Get("/version", func(c *fiber.Ctx) error {
+	root.Get("/version", func(c *fiber.Ctx) error {
 		return c.JSON(metadata.Metadata())
 	})
 	if options.Mission != nil {
-		mission.NewHTTPHandler(options.Mission).Register(app.Group("/v1"))
+		mission.NewSecureHTTPHandler(options.Mission, options.MissionIdentity, options.AllowTrustedIdentityHeader).Register(root.Group("/v1"))
 	}
 
 	return app

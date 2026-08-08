@@ -21,6 +21,9 @@ func TestFirstMissionFlow(t *testing.T) {
 		t.Fatalf("created mission = %#v", m)
 	}
 	assetBody := []byte{0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00}
+	if _, err := service.UploadProductReference(ctx, m.ID, 1, "image/jpeg", assetBody); err != nil {
+		t.Fatalf("product reference: %v", err)
+	}
 	for _, shot := range []int{3, 1, 2} {
 		m, err = service.Upload(ctx, m.ID, shot, "image/jpeg", assetBody)
 		if err != nil {
@@ -41,6 +44,9 @@ func TestFirstMissionFlow(t *testing.T) {
 	}
 	if m.State != StateDraftReady || m.Draft == nil || m.Draft.GeneratedBy != "deterministic-fallback" || len(m.Draft.Timeline) != 3 {
 		t.Fatalf("draft mission = %#v", m)
+	}
+	if m.Draft.ProductionSpec.SchemaVersion != ProductionSpecSchemaVersion || len(m.Draft.ProductionSpec.Shots) != 3 || len(m.Draft.RoleExecutions) != 5 {
+		t.Fatalf("canonical production spec = %#v", m.Draft)
 	}
 	for index, clip := range m.Draft.Timeline {
 		if clip.Shot != index+1 {
@@ -76,11 +82,62 @@ func TestFirstMissionFlow(t *testing.T) {
 	if m.State != StatePosted || m.Posted == nil || m.Posted.Platform != "tiktok" {
 		t.Fatalf("posted mission = %#v", m)
 	}
+	m, err = service.RecordOutcome(ctx, m.ID, 100, 10, 1)
+	if err != nil || m.State != StateNextMissionReady || m.NextAction == nil || m.NextAction.Kind != "repeat" {
+		t.Fatalf("outcome mission=%#v err=%v", m, err)
+	}
 	if len(ledger.Costs) != 1 || ledger.Costs[0].CostMicros != 0 {
 		t.Fatalf("cost ledger = %#v", ledger.Costs)
 	}
-	if len(ledger.Audits) != 7 {
-		t.Fatalf("audit count = %d, want 7", len(ledger.Audits))
+	if len(ledger.Audits) != 9 {
+		t.Fatalf("audit count = %d, want 9", len(ledger.Audits))
+	}
+}
+
+func TestDraftRequiresProductReference(t *testing.T) {
+	service := NewService(NewMemoryRepository(), MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "id" })
+	m, err := service.Create(context.Background(), "u", Product{Name: "สินค้า", Description: "ข้อมูลจริง"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	photo := []byte{0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00}
+	for shot := 1; shot <= 3; shot++ {
+		if _, err := service.Upload(context.Background(), m.ID, shot, "image/jpeg", photo); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := service.GenerateDraft(context.Background(), m.ID); err == nil {
+		t.Fatal("draft accepted without product reference")
+	}
+}
+
+func TestProductReferencePutIsIdempotentAndReplaceableBeforeDraft(t *testing.T) {
+	service := NewService(NewMemoryRepository(), MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "id" })
+	m, err := service.Create(context.Background(), "u", Product{Name: "สินค้า", Description: "ข้อมูลจริง"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := []byte{0xFF, 0xD8, 0xFF, 0xDB, 0, 1}
+	m, err = service.UploadProductReference(context.Background(), m.ID, 1, "image/jpeg", first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := m.Version
+	m, err = service.UploadProductReference(context.Background(), m.ID, 1, "image/jpeg", first)
+	if err != nil || m.Version != version {
+		t.Fatalf("idempotent reference version=%d err=%v", m.Version, err)
+	}
+	second := append(append([]byte(nil), first...), 2)
+	m, err = service.UploadProductReference(context.Background(), m.ID, 1, "image/jpeg", second)
+	if err != nil || m.Version != version+1 || len(m.ProductReferences) != 1 {
+		t.Fatalf("replace reference mission=%#v err=%v", m, err)
+	}
+}
+
+func TestOutcomeValidation(t *testing.T) {
+	service := NewService(NewMemoryRepository(), MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "id" })
+	if _, err := service.RecordOutcome(context.Background(), "id", 1, 2, 0); err == nil {
+		t.Fatal("accepted clicks greater than views")
 	}
 }
 
@@ -104,8 +161,9 @@ func TestFirstMissionRejectsOutOfOrderAndDuplicateActions(t *testing.T) {
 	if _, err := service.Upload(ctx, m.ID, 1, "image/jpeg", photo); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Upload(ctx, m.ID, 1, "image/jpeg", append(photo, 0x01)); err == nil {
-		t.Fatal("accepted duplicate shot")
+	replaced, err := service.Upload(ctx, m.ID, 1, "image/jpeg", append(photo, 0x01))
+	if err != nil || len(replaced.Assets) != 1 || replaced.Assets[0].SHA256 == "" {
+		t.Fatalf("replace shot: mission=%#v err=%v", replaced, err)
 	}
 }
 
@@ -154,6 +212,41 @@ type inconsistentObjectStore struct{}
 
 func (inconsistentObjectStore) Put(context.Context, string, string, io.Reader) (ObjectMetadata, error) {
 	return ObjectMetadata{Key: "wrong/key", ContentType: "image/jpeg", Bytes: 7, SHA256: "wrong"}, nil
+}
+
+type statusExportQueue struct{ job ProcessingJob }
+
+func (q *statusExportQueue) EnqueueExport(context.Context, ExportRequest) (ProcessingJob, error) {
+	return q.job, nil
+}
+func (q *statusExportQueue) GetExport(context.Context, string) (ProcessingJob, error) {
+	return q.job, nil
+}
+
+type signingMemoryStore struct{ MemoryObjectStore }
+
+func (signingMemoryStore) DownloadURL(context.Context, string, time.Duration) (string, error) {
+	return "https://s3.example/download", nil
+}
+
+func TestGetReconcilesCompletedExportAndRenewsDownloadURL(t *testing.T) {
+	repo := NewMemoryRepository()
+	now := time.Date(2026, 8, 9, 1, 0, 0, 0, time.UTC)
+	m := Mission{ID: "m1", UserID: "u", State: StateExportQueued, Version: 1, ExportJob: &ProcessingJob{ID: "j1", State: JobQueued}, Export: &Export{StorageKey: "missions/m1/exports/first-post.mp4"}, CreatedAt: now, UpdatedAt: now}
+	if err := repo.Create(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+	queue := &statusExportQueue{job: ProcessingJob{ID: "j1", State: JobSucceeded}}
+	service := NewServiceWithOptions(repo, signingMemoryStore{}, CaptionBackedPlanner{}, queue, nil, &MemoryLedger{}, func() time.Time { return now }, func() string { return "id" }, 1024)
+	got, err := service.Get(context.Background(), m.ID)
+	if err != nil || got.State != StateExported || got.Export.DownloadURL == "" {
+		t.Fatalf("mission=%#v err=%v", got, err)
+	}
+	version := got.Version
+	got, err = service.Get(context.Background(), m.ID)
+	if err != nil || got.Version != version || got.Export.DownloadURL == "" {
+		t.Fatalf("renew mission=%#v err=%v", got, err)
+	}
 }
 
 func TestUploadRejectsInconsistentObjectStoreMetadata(t *testing.T) {

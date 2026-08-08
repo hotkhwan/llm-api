@@ -11,8 +11,8 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("Load() error = %v", err)
 	}
 	if cfg.Environment != "development" || cfg.HTTPAddr != ":8080" || cfg.ShutdownTimeout != 10*time.Second ||
-		cfg.ReadTimeout != 5*time.Second || cfg.WriteTimeout != 15*time.Second || cfg.IdleTimeout != 60*time.Second ||
-		cfg.BodyLimit != 1<<20 || cfg.Concurrency != 1024 {
+		cfg.ReadTimeout != 5*time.Second || cfg.WriteTimeout != 60*time.Second || cfg.IdleTimeout != 60*time.Second ||
+		cfg.BodyLimit != 64<<20 || cfg.Concurrency != 1024 {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 }
@@ -27,6 +27,13 @@ func TestLoadOverrides(t *testing.T) {
 		"HTTP_IDLE_TIMEOUT":     "90s",
 		"HTTP_BODY_LIMIT_BYTES": "2048",
 		"HTTP_CONCURRENCY":      "128",
+		"MONGO_URI":             "mongodb://mongo.invalid:27017",
+		"S3_ENDPOINT":           "http://s3.invalid:9000",
+		"S3_PRESIGN_ENDPOINT":   "https://site-s3.invalid",
+		"S3_ACCESS_KEY":         "test-access",
+		"S3_SECRET_KEY":         "test-secret",
+		"OIDC_ISSUER":           "https://identity.invalid/realms/project",
+		"OIDC_AUDIENCE":         "kwanni-api",
 	}
 	cfg, err := Load(func(key string) string { return values[key] })
 	if err != nil {
@@ -55,7 +62,9 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"HTTP_READ_TIMEOUT": "10s", "HTTP_WRITE_TIMEOUT": "5s"},
 		{"HTTP_READ_TIMEOUT": "10s", "HTTP_IDLE_TIMEOUT": "5s"},
 		{"HTTP_BODY_LIMIT_BYTES": "1023"},
-		{"HTTP_BODY_LIMIT_BYTES": "8388609"},
+		{"HTTP_BODY_LIMIT_BYTES": "268435457"},
+		{"APP_BASE_PATH": "relative"},
+		{"APP_BASE_PATH": "/dev/../secret"},
 		{"HTTP_BODY_LIMIT_BYTES": "lots"},
 		{"HTTP_CONCURRENCY": "63"},
 		{"HTTP_CONCURRENCY": "8193"},
@@ -80,6 +89,8 @@ func TestLoadAcceptsResourceBoundaries(t *testing.T) {
 		{"HTTP_IDLE_TIMEOUT": "5m"},
 		{"HTTP_BODY_LIMIT_BYTES": "1024"},
 		{"HTTP_BODY_LIMIT_BYTES": "8388608"},
+		{"HTTP_BODY_LIMIT_BYTES": "268435456"},
+		{"APP_BASE_PATH": "/dev/llm-api"},
 		{"HTTP_CONCURRENCY": "64"},
 		{"HTTP_CONCURRENCY": "8192"},
 	}

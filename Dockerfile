@@ -16,9 +16,11 @@ RUN ./scripts/verify-version.sh "${VERSION}" "${VCS_REF}" && \
     -ldflags="-s -w -X github.com/hotkhwan/llm-api/internal/buildinfo.version=${VERSION} -X github.com/hotkhwan/llm-api/internal/buildinfo.commit=${VCS_REF}" \
     -o /out/llm-api ./cmd/api
 
-FROM scratch
+FROM docker.io/library/golang:1.26.5-alpine@sha256:0178a641fbb4858c5f1b48e34bdaabe0350a330a1b1149aabd498d0699ff5fb2
 ARG VERSION
 ARG VCS_REF
+RUN apk add --no-cache ca-certificates ffmpeg && \
+    rm -rf /usr/local/go /go /root/.cache
 LABEL org.opencontainers.image.source="https://github.com/hotkhwan/llm-api" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.revision="${VCS_REF}"

@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"io"
 	"sync"
+	"time"
 )
 
 type MemoryRepository struct {
@@ -56,10 +57,13 @@ func cloneMission(value Mission) Mission {
 	value.Product.Facts = append([]string(nil), value.Product.Facts...)
 	value.Shots = append([]Shot(nil), value.Shots...)
 	value.Assets = append([]Asset(nil), value.Assets...)
+	value.ProductReferences = append([]ProductReference(nil), value.ProductReferences...)
 	if value.Draft != nil {
 		copy := *value.Draft
 		copy.Hashtags = append([]string(nil), copy.Hashtags...)
 		copy.Timeline = append([]Clip(nil), copy.Timeline...)
+		copy.ProductionSpec = cloneProductionSpec(copy.ProductionSpec)
+		copy.RoleExecutions = append([]RoleExecution(nil), copy.RoleExecutions...)
 		value.Draft = &copy
 	}
 	if value.Export != nil {
@@ -69,6 +73,37 @@ func cloneMission(value Mission) Mission {
 	if value.Posted != nil {
 		copy := *value.Posted
 		value.Posted = &copy
+	}
+	if value.ExportJob != nil {
+		copy := *value.ExportJob
+		value.ExportJob = &copy
+	}
+	if value.Outcome != nil {
+		copy := *value.Outcome
+		value.Outcome = &copy
+	}
+	if value.NextAction != nil {
+		copy := *value.NextAction
+		value.NextAction = &copy
+	}
+	return value
+}
+
+func cloneProductionSpec(value ProductionSpec) ProductionSpec {
+	value.StoryBeats = append([]string(nil), value.StoryBeats...)
+	value.Shots = append([]ProductionShot(nil), value.Shots...)
+	value.Continuity.Product.VerifiedFacts = append([]string(nil), value.Continuity.Product.VerifiedFacts...)
+	value.Continuity.Product.ReferenceKeys = append([]string(nil), value.Continuity.Product.ReferenceKeys...)
+	value.Continuity.Product.RequiredDetails = append([]string(nil), value.Continuity.Product.RequiredDetails...)
+	value.Continuity.Product.ForbiddenChanges = append([]string(nil), value.Continuity.Product.ForbiddenChanges...)
+	value.Continuity.Character.Constraints = append([]string(nil), value.Continuity.Character.Constraints...)
+	value.Continuity.Camera.Constraints = append([]string(nil), value.Continuity.Camera.Constraints...)
+	if value.ProviderPrompts != nil {
+		copied := make(map[string]string, len(value.ProviderPrompts))
+		for key, item := range value.ProviderPrompts {
+			copied[key] = item
+		}
+		value.ProviderPrompts = copied
 	}
 	return value
 }
@@ -82,6 +117,43 @@ func (MemoryObjectStore) Put(_ context.Context, key, contentType string, reader 
 		return ObjectMetadata{}, err
 	}
 	return ObjectMetadata{Key: key, ContentType: contentType, Bytes: n, SHA256: hex.EncodeToString(h.Sum(nil))}, nil
+}
+
+func (MemoryObjectStore) DownloadURL(_ context.Context, key string, _ time.Duration) (string, error) {
+	return "", nil
+}
+
+type MemoryJobQueue struct {
+	mu   sync.Mutex
+	jobs map[string]ProcessingJob
+	now  func() time.Time
+	id   IDGenerator
+}
+
+func NewMemoryJobQueue(now func() time.Time, id IDGenerator) *MemoryJobQueue {
+	return &MemoryJobQueue{jobs: make(map[string]ProcessingJob), now: now, id: id}
+}
+
+func (q *MemoryJobQueue) EnqueueExport(_ context.Context, request ExportRequest) (ProcessingJob, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if job, exists := q.jobs[request.IdempotencyKey]; exists {
+		return job, nil
+	}
+	job := ProcessingJob{ID: q.id(), Kind: "ffmpegExport", State: JobSucceeded, IdempotencyKey: request.IdempotencyKey, UpdatedAt: q.now().UTC()}
+	q.jobs[request.IdempotencyKey] = job
+	return job, nil
+}
+
+func (q *MemoryJobQueue) GetExport(_ context.Context, id string) (ProcessingJob, error) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for _, job := range q.jobs {
+		if job.ID == id {
+			return job, nil
+		}
+	}
+	return ProcessingJob{}, ErrNotFound
 }
 
 type MemoryLedger struct {

@@ -5,13 +5,16 @@ import "time"
 type State string
 
 const (
-	StateMissionAccepted State = "missionAccepted"
-	StateCaptureStarted  State = "captureStarted"
-	StateAssetsUploaded  State = "assetsUploaded"
-	StateDraftGenerating State = "draftGenerating"
-	StateDraftReady      State = "draftReady"
-	StateExported        State = "exported"
-	StatePosted          State = "posted"
+	StateMissionAccepted  State = "missionAccepted"
+	StateCaptureStarted   State = "captureStarted"
+	StateAssetsUploaded   State = "assetsUploaded"
+	StateDraftGenerating  State = "draftGenerating"
+	StateDraftReady       State = "draftReady"
+	StateExportQueued     State = "exportQueued"
+	StateExported         State = "exported"
+	StatePosted           State = "posted"
+	StateResultRecorded   State = "resultRecorded"
+	StateNextMissionReady State = "nextMissionReady"
 )
 
 type Product struct {
@@ -20,6 +23,110 @@ type Product struct {
 	Price       string   `json:"price,omitempty"`
 	Promotion   string   `json:"promotion,omitempty"`
 	Facts       []string `json:"facts,omitempty"`
+}
+
+type ConsentEvidence struct {
+	PrivacyNoticeVersion string    `json:"privacyNoticeVersion"`
+	AcceptedAt           time.Time `json:"acceptedAt"`
+}
+
+// ProductionSpec is the provider-neutral source of truth for an affiliate
+// short. Veo, Seedance and future renderers compile from this structure; they
+// must never become the source of product or continuity facts.
+type ProductionSpec struct {
+	SchemaVersion   string            `json:"schemaVersion"`
+	ProjectType     string            `json:"projectType"`
+	DurationSeconds int               `json:"durationSeconds"`
+	Platform        string            `json:"platform"`
+	AspectRatio     string            `json:"aspectRatio"`
+	CreativeIntent  string            `json:"creativeIntent"`
+	StoryBeats      []string          `json:"storyBeats"`
+	Continuity      ContinuityBible   `json:"continuity"`
+	Shots           []ProductionShot  `json:"shots"`
+	ProviderPrompts map[string]string `json:"providerPrompts,omitempty"`
+}
+
+type ContinuityBible struct {
+	Product   ProductBible   `json:"product"`
+	Character CharacterBible `json:"character"`
+	Wardrobe  WardrobeBible  `json:"wardrobe"`
+	Makeup    MakeupBible    `json:"makeup"`
+	Location  LocationBible  `json:"location"`
+	Lighting  LightingBible  `json:"lighting"`
+	Camera    CameraBible    `json:"camera"`
+}
+
+type ProductBible struct {
+	Name             string   `json:"name"`
+	ReferenceKeys    []string `json:"referenceKeys"`
+	VerifiedFacts    []string `json:"verifiedFacts"`
+	RequiredDetails  []string `json:"requiredDetails"`
+	ForbiddenChanges []string `json:"forbiddenChanges"`
+}
+type CharacterBible struct {
+	Description string   `json:"description"`
+	Constraints []string `json:"constraints"`
+}
+type WardrobeBible struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+type MakeupBible struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+type LocationBible struct {
+	ID          string `json:"id"`
+	Description string `json:"description"`
+}
+type LightingBible struct {
+	ID                     string `json:"id"`
+	Style                  string `json:"style"`
+	ColorTemperatureKelvin int    `json:"colorTemperatureKelvin"`
+}
+type CameraBible struct {
+	Orientation string   `json:"orientation"`
+	AspectRatio string   `json:"aspectRatio"`
+	Constraints []string `json:"constraints"`
+}
+
+type ProductionShot struct {
+	ShotID          string         `json:"shotId"`
+	CaptureShot     int            `json:"captureShot"`
+	DurationSeconds int            `json:"durationSeconds"`
+	ShotSize        string         `json:"shotSize"`
+	CameraAngle     string         `json:"cameraAngle"`
+	LensMM          int            `json:"lensMm"`
+	CameraMovement  string         `json:"cameraMovement"`
+	SubjectAction   string         `json:"subjectAction"`
+	Composition     string         `json:"composition"`
+	Lighting        ShotLighting   `json:"lighting"`
+	Continuity      ShotContinuity `json:"continuity"`
+}
+type ShotLighting struct {
+	Style                  string `json:"style"`
+	KeyDirection           string `json:"keyDirection"`
+	ColorTemperatureKelvin int    `json:"colorTemperatureKelvin"`
+}
+type ShotContinuity struct {
+	ProductOrientation string `json:"productOrientation"`
+	WardrobeID         string `json:"wardrobeId"`
+	LocationID         string `json:"locationId"`
+}
+
+type AgentRole string
+
+const (
+	RoleCreativeDirector  AgentRole = "creativeDirector"
+	RoleStoryDirector     AgentRole = "storyDirector"
+	RoleBrandGuard        AgentRole = "brandGuard"
+	RoleProductionPlanner AgentRole = "productionPlanner"
+	RolePromptCompiler    AgentRole = "promptCompiler"
+)
+
+type RoleExecution struct {
+	Role    AgentRole `json:"role"`
+	Runtime string    `json:"runtime"`
 }
 
 type Shot struct {
@@ -35,6 +142,14 @@ type Asset struct {
 	SHA256      string `json:"sha256"`
 }
 
+type ProductReference struct {
+	Index       int    `json:"index"`
+	StorageKey  string `json:"storageKey"`
+	ContentType string `json:"contentType"`
+	Bytes       int64  `json:"bytes"`
+	SHA256      string `json:"sha256"`
+}
+
 type Clip struct {
 	Shot       int    `json:"shot"`
 	StorageKey string `json:"storageKey"`
@@ -43,18 +158,41 @@ type Clip struct {
 }
 
 type Draft struct {
-	Caption     string   `json:"caption"`
-	CTA         string   `json:"cta"`
-	Hashtags    []string `json:"hashtags"`
-	Timeline    []Clip   `json:"timeline"`
-	GeneratedBy string   `json:"generatedBy"`
+	Caption        string          `json:"caption"`
+	CTA            string          `json:"cta"`
+	Hashtags       []string        `json:"hashtags"`
+	Timeline       []Clip          `json:"timeline"`
+	GeneratedBy    string          `json:"generatedBy"`
+	ProductionSpec ProductionSpec  `json:"productionSpec"`
+	RoleExecutions []RoleExecution `json:"roleExecutions"`
 }
 
 type Export struct {
-	StorageKey string `json:"storageKey"`
-	Format     string `json:"format"`
-	Width      int    `json:"width"`
-	Height     int    `json:"height"`
+	StorageKey  string `json:"storageKey"`
+	Format      string `json:"format"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+	JobID       string `json:"jobId"`
+	DownloadURL string `json:"downloadUrl,omitempty"`
+}
+
+type JobState string
+
+const (
+	JobQueued    JobState = "queued"
+	JobRunning   JobState = "running"
+	JobSucceeded JobState = "succeeded"
+	JobFailed    JobState = "failed"
+)
+
+type ProcessingJob struct {
+	ID             string    `json:"id"`
+	Kind           string    `json:"kind"`
+	State          JobState  `json:"state"`
+	Attempt        int       `json:"attempt"`
+	IdempotencyKey string    `json:"idempotencyKey"`
+	LastError      string    `json:"lastError,omitempty"`
+	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
 type Posted struct {
@@ -63,19 +201,37 @@ type Posted struct {
 	At       time.Time `json:"at"`
 }
 
+type Outcome struct {
+	Views      int64     `json:"views"`
+	Clicks     int64     `json:"clicks"`
+	Sales      int64     `json:"sales"`
+	RecordedAt time.Time `json:"recordedAt"`
+}
+
+type NextAction struct {
+	Kind   string `json:"kind"`
+	Title  string `json:"title"`
+	Reason string `json:"reason"`
+}
+
 type Mission struct {
-	ID        string    `json:"id"`
-	UserID    string    `json:"userId"`
-	Product   Product   `json:"product"`
-	State     State     `json:"state"`
-	Shots     []Shot    `json:"shots"`
-	Assets    []Asset   `json:"assets,omitempty"`
-	Draft     *Draft    `json:"draft,omitempty"`
-	Export    *Export   `json:"export,omitempty"`
-	Posted    *Posted   `json:"posted,omitempty"`
-	Version   int64     `json:"version"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID                string             `json:"id"`
+	UserID            string             `json:"userId"`
+	Product           Product            `json:"product"`
+	Consent           ConsentEvidence    `json:"consent"`
+	State             State              `json:"state"`
+	Shots             []Shot             `json:"shots"`
+	Assets            []Asset            `json:"assets,omitempty"`
+	ProductReferences []ProductReference `json:"productReferences,omitempty"`
+	Draft             *Draft             `json:"draft,omitempty"`
+	Export            *Export            `json:"export,omitempty"`
+	Posted            *Posted            `json:"posted,omitempty"`
+	ExportJob         *ProcessingJob     `json:"exportJob,omitempty"`
+	Outcome           *Outcome           `json:"outcome,omitempty"`
+	NextAction        *NextAction        `json:"nextAction,omitempty"`
+	Version           int64              `json:"version"`
+	CreatedAt         time.Time          `json:"createdAt"`
+	UpdatedAt         time.Time          `json:"updatedAt"`
 }
 
 type AuditEvent struct {

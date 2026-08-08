@@ -1,6 +1,7 @@
 package mission
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -8,22 +9,94 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-type HTTPHandler struct{ service *Service }
+type IdentityVerifier interface {
+	Verify(context.Context, string) (string, error)
+}
 
-func NewHTTPHandler(service *Service) *HTTPHandler { return &HTTPHandler{service: service} }
+type HTTPHandler struct {
+	service            *Service
+	identity           IdentityVerifier
+	allowTrustedHeader bool
+}
+
+func NewHTTPHandler(service *Service) *HTTPHandler {
+	return &HTTPHandler{service: service, allowTrustedHeader: true}
+}
+func NewSecureHTTPHandler(service *Service, identity IdentityVerifier, allowTrustedHeader bool) *HTTPHandler {
+	return &HTTPHandler{service: service, identity: identity, allowTrustedHeader: allowTrustedHeader}
+}
 
 func (h *HTTPHandler) Register(router fiber.Router) {
+	router.Use(h.authenticate)
 	router.Post("/missions", h.create)
 	router.Get("/missions/:id", h.get)
 	router.Put("/missions/:id/assets/:shot", h.upload)
+	router.Put("/missions/:id/product-references/:index", h.uploadProductReference)
 	router.Post("/missions/:id/draft", h.draft)
 	router.Post("/missions/:id/export", h.export)
 	router.Post("/missions/:id/posted", h.posted)
+	router.Put("/missions/:id/outcome", h.outcome)
+}
+
+func (h *HTTPHandler) authenticate(c *fiber.Ctx) error {
+	userID := ""
+	if authorization := strings.TrimSpace(c.Get(fiber.HeaderAuthorization)); strings.HasPrefix(authorization, "Bearer ") && h.identity != nil {
+		verified, err := h.identity.Verify(c.UserContext(), strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer ")))
+		if err == nil {
+			userID = strings.TrimSpace(verified)
+		}
+	}
+	if userID == "" && h.allowTrustedHeader {
+		userID = strings.TrimSpace(c.Get("X-Authenticated-User-ID"))
+	}
+	if userID == "" {
+		return apiError(c, fiber.StatusUnauthorized, "authentication_required", "authenticated user identity is required")
+	}
+	c.Locals("authenticatedUserID", userID)
+	missionID := missionIDFromPath(c.Path())
+	if missionID != "" {
+		value, err := h.service.Get(c.UserContext(), missionID)
+		if err != nil {
+			return mapServiceError(c, err)
+		}
+		if value.UserID != userID {
+			// Do not reveal the existence of another user's mission.
+			return apiError(c, fiber.StatusNotFound, "mission_not_found", "mission was not found")
+		}
+	}
+	return c.Next()
+}
+
+func missionIDFromPath(value string) string {
+	marker := "/missions/"
+	position := strings.Index(value, marker)
+	if position < 0 {
+		return ""
+	}
+	remainder := strings.TrimPrefix(value[position:], marker)
+	if separator := strings.IndexByte(remainder, '/'); separator >= 0 {
+		remainder = remainder[:separator]
+	}
+	return strings.TrimSpace(remainder)
+}
+
+func (h *HTTPHandler) uploadProductReference(c *fiber.Ctx) error {
+	index, err := strconv.Atoi(c.Params("index"))
+	if err != nil {
+		return apiError(c, fiber.StatusBadRequest, "invalid_product_reference", "index must be between 1 and 5")
+	}
+	contentType := strings.TrimSpace(strings.Split(c.Get(fiber.HeaderContentType), ";")[0])
+	result, err := h.service.UploadProductReference(c.UserContext(), c.Params("id"), index, contentType, c.Body())
+	if err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(result)
 }
 
 type createRequest struct {
-	UserID  string  `json:"userId"`
-	Product Product `json:"product"`
+	Product              Product `json:"product"`
+	ConsentAccepted      bool    `json:"consentAccepted"`
+	PrivacyNoticeVersion string  `json:"privacyNoticeVersion"`
 }
 
 func (h *HTTPHandler) create(c *fiber.Ctx) error {
@@ -31,7 +104,11 @@ func (h *HTTPHandler) create(c *fiber.Ctx) error {
 	if err := c.BodyParser(&request); err != nil {
 		return apiError(c, fiber.StatusBadRequest, "invalid_json", "request must be valid JSON")
 	}
-	result, err := h.service.Create(c.UserContext(), request.UserID, request.Product)
+	userID, _ := c.Locals("authenticatedUserID").(string)
+	if !request.ConsentAccepted {
+		return apiError(c, fiber.StatusBadRequest, "consent_required", "privacy notice consent is required")
+	}
+	result, err := h.service.CreateWithConsent(c.UserContext(), userID, request.Product, request.PrivacyNoticeVersion)
 	if err != nil {
 		return mapServiceError(c, err)
 	}
@@ -85,6 +162,24 @@ func (h *HTTPHandler) posted(c *fiber.Ctx) error {
 		return apiError(c, fiber.StatusBadRequest, "invalid_json", "request must be valid JSON")
 	}
 	result, err := h.service.MarkPosted(c.UserContext(), c.Params("id"), request.Platform, request.PostURL)
+	if err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.JSON(result)
+}
+
+type outcomeRequest struct {
+	Views  int64 `json:"views"`
+	Clicks int64 `json:"clicks"`
+	Sales  int64 `json:"sales"`
+}
+
+func (h *HTTPHandler) outcome(c *fiber.Ctx) error {
+	var request outcomeRequest
+	if err := c.BodyParser(&request); err != nil {
+		return apiError(c, fiber.StatusBadRequest, "invalid_json", "request must be valid JSON")
+	}
+	result, err := h.service.RecordOutcome(c.UserContext(), c.Params("id"), request.Views, request.Clicks, request.Sales)
 	if err != nil {
 		return mapServiceError(c, err)
 	}

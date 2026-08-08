@@ -30,7 +30,7 @@ func safeGeneratedContent(result CaptionResult) bool {
 	if strings.TrimSpace(result.Caption) == "" || len([]rune(result.Caption)) > 500 || len(result.Hashtags) > 12 {
 		return false
 	}
-	for _, prohibited := range []string{"รับประกันรายได้", "รายได้แน่นอน", "รวยเร็ว", "guaranteed income", "get rich quick"} {
+	for _, prohibited := range []string{"รับประกันรายได้", "รับประกันยอดขาย", "รายได้แน่นอน", "รายได้ทุกวัน", "รวยเร็ว", "ทำเงินอัตโนมัติ", "ai ทำเงินแทนคุณ", "guaranteed income", "guaranteed sales", "get rich quick"} {
 		if strings.Contains(combined, prohibited) {
 			return false
 		}

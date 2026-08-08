@@ -1,62 +1,66 @@
-# KWANNI Mission Zero backend — Phase 1
+# KWANNI Mission Zero backend
 
-## Outcome
+## User outcome
 
-This phase proves one coherent API behavior:
+`manual product → product reference → mission → replaceable 3-shot capture → draft → verified MP4 export → mark posted → record outcome → next action`
 
-`manual product → missionAccepted → captureStarted → assetsUploaded → draftReady → exported → posted`
+The API does not aggregate trends, publish automatically, sell credits, promise
+income, or run an affiliate marketplace.
 
-It intentionally does not implement trend aggregation, automatic publishing,
-credits, a marketplace, or income claims.
+## Production brain
 
-## Runtime boundaries
+One Qwen3.6 runtime performs the creative, story, brand-guard, production-plan
+and prompt-compiler roles in a single structured request. Its output is the
+versioned `kwanni.production/v1` Canonical Production Spec: story beats, three
+shots, provider-neutral camera/lighting data, provider compilers and product,
+character, wardrobe, makeup, location, lighting and camera continuity bibles.
 
-- `Repository` is an optimistic compare-and-swap contract. A MongoDB adapter
-  must update by `{_id, version}` and increment `version`, returning a conflict
-  when another worker has already advanced the mission.
-- `ObjectStore` models the S3 API served by SeaweedFS. Production code must use
-  a dedicated bucket/prefix and credentials delivered through the platform
-  secret provider. The domain has no MinIO-named type or dependency.
-- `CaptionGenerator` accepts product facts and produces structured caption
-  output. `OpenAICompatibleCaptioner` can call the private local endpoint;
-  `FallbackCaptioner` ensures model downtime cannot block the first post.
-- `AuditSink` records state changes and actual generation units/cost. The
-  production adapter should use an atomic outbox with mission state changes.
+The deterministic planner is a fail-safe when Qwen is absent, slow or emits an
+invalid/unsafe schema. It still produces a complete CPS from verified facts.
+ShotVL is an optional `VisualQCQueue`, loaded on demand after keyframe
+extraction. It is not resident and never blocks First Mission or First Post.
 
-The process currently wires in-memory adapters so the slice is testable before
-cluster secrets and databases are available. It is not durable and must not be
-used as production persistence.
+## Durable runtime
 
-## Media behavior
+- MongoDB persists missions with `{id, version}` compare-and-swap, audit/cost
+  events, export job payloads and a unique job idempotency key.
+- SeaweedFS is accessed through its standard S3 endpoint. Assets and output
+  record exact byte count and SHA-256; downloads use short-lived signed URLs.
+- The synchronous Mission Zero FFmpeg processor claims an idempotent job,
+  downloads exactly three bounded assets, normalizes each segment to vertical
+  1080x1920 H.264, concatenates them, verifies codec/dimensions with ffprobe,
+  and only then uploads and reports `exported`. Failed jobs are retryable.
+- Production fails configuration validation unless MongoDB and SeaweedFS
+  endpoint/credentials are present. Development/test may use in-memory
+  adapters explicitly for tests; they are not production evidence.
 
-Each mission requires exactly three image or video assets. The API records the
-SeaweedFS object key, MIME type, size, and SHA-256 digest. Draft generation
-creates a three-clip vertical-video edit plan and a truthful caption. Export
-currently reserves the immutable target
-`missions/{missionId}/exports/first-post.mp4`; rendering the bytes is delegated
-to the upcoming FFmpeg worker.
+Runtime secrets are `MONGO_URI`, `S3_ACCESS_KEY`, `S3_SECRET_KEY` and optional
+`LOCAL_LLM_API_KEY`; Kubernetes Secret injects them. The local AI bridge uses
+`LOCAL_LLM_URL=http://local-ai-bridge.local-ai.svc.cluster.local:18082/v1` and
+the selected catalog alias in `LOCAL_LLM_MODEL`. Secrets must not enter source,
+logs, command arguments, examples, or mission records.
 
-Asset bytes are sniffed and must match the declared media type. Retrying an
-identical shot, draft, export, or mark-posted operation returns the existing
-result without changing its version or adding duplicate ledger entries;
-conflicting retries fail closed.
-The domain also verifies that the storage adapter returns the requested key,
-media type, byte count, and SHA-256 digest before recording an asset.
+## Security and privacy
 
-## Next implementation backlog
+The HTTP boundary ignores caller-supplied user IDs and requires the trusted
+gateway identity header `X-Authenticated-User-ID`. Every mission route verifies
+ownership without revealing another user's mission. Creation requires explicit
+privacy-notice consent and stores its version/time. Product and capture bytes
+are MIME-sniffed and size-bounded. A different PUT replaces a mistaken image or
+shot only before drafting; an identical retry is idempotent.
 
-1. MongoDB repository plus indexes and transactional outbox.
-2. SeaweedFS S3 adapter with bounded streaming upload, bucket policy, and
-   presigned download.
-3. FFmpeg worker with idempotency key, resume/retry, and output verification.
-4. Authentication adapter that derives `userId` from Klynx identity rather
-   than accepting it from the request body.
-5. Persisted audit/cost ledger and provider retry-reserve accounting.
-6. Click/sale result recording, next-mission generation, and activation events.
-7. Privacy notice/consent evidence and media retention/deletion workflow.
+## Retry and resume
 
-## Acceptance checks
+Mission state is optimistic-CAS protected. Uploads, references, draft, export,
+mark-posted and outcome retries return the existing result when identical.
+Draft generation can resume from `draftGenerating`. Export jobs are keyed by
+mission/version, persist failure evidence, and retry the same work rather than
+creating duplicate artifacts.
 
-`go test ./...` includes a service-level flow and an HTTP flow through all Phase
-1 states. It also covers invalid transitions, duplicate shots, media-type
-validation, local-LLM structured output, and deterministic fallback.
+## Deferred beyond Mission Zero
+
+- Autonomous publishing, marketplace, wallet and cross-platform trend crawl.
+- A resident VLM. ShotVL remains advisory/load-on-demand until its benchmark
+  and operational envelope pass.
+- The 35B challenger. Qwen3.6-27B-Q8_0-MTP-16K remains primary until blind
+  production-spec evaluation shows a material quality gain.

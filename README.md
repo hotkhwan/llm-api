@@ -1,13 +1,13 @@
 # KWANNI API
 
-Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.2.0`
-adds the first end-to-end Mission Zero slice:
+Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.3.0`
+implements the first durable end-to-end Mission Zero slice:
 
-`manual product → mission → 3-shot capture → draft → export → mark posted`
+`manual product → product reference → mission → 3-shot capture → draft → export → mark posted → outcome → next action`
 
-The current media step creates a deterministic edit plan and export target. An
-FFmpeg worker, MongoDB adapter, and SeaweedFS S3 production adapter remain
-explicit deployment work; see [Mission Zero Phase 1](docs/mission-zero-phase1.md).
+MongoDB, SeaweedFS S3, a restart-safe leased FFmpeg worker, OIDC ownership,
+Qwen role planning and Canonical Production Spec v1 are included; see
+[Mission Zero backend](docs/mission-zero-phase1.md).
 
 ## Local checks
 
@@ -39,13 +39,17 @@ Copy `.env.example` values into your process environment and run `go run ./cmd/a
 - `POST /v1/missions`
 - `GET /v1/missions/{id}`
 - `PUT /v1/missions/{id}/assets/{shot}`
+- `PUT /v1/missions/{id}/product-references/{index}`
 - `POST /v1/missions/{id}/draft`
 - `POST /v1/missions/{id}/export`
 - `POST /v1/missions/{id}/posted`
+- `PUT /v1/missions/{id}/outcome`
 
 The local LLM is optional. If it is unavailable or returns invalid structured
-output, the API uses a deterministic Thai caption so First Mission remains
-usable. No endpoint promises income or sales.
+output, the API uses a deterministic Thai plan so First Mission remains usable.
+No endpoint promises income or sales. Production verifies bearer JWTs with the
+configured OIDC issuer/audience; the trusted identity header is allowed only
+when explicitly enabled for a controlled development/Alpha environment.
 
 Configuration is restricted to the non-secret settings documented in `.env.example`. JSON request logs are written to stdout and include a validated or generated `X-Request-ID`.
 
