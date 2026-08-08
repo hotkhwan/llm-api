@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -15,14 +16,17 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+const defaultMaxSeaweedObjectBytes int64 = 512 << 20
+
 // SeaweedFSStore uses only the standard S3 protocol exposed by SeaweedFS.
 // Credentials are constructor inputs from the runtime secret provider and are
 // never retained in domain records or logs.
 type SeaweedFSStore struct {
-	bucket  string
-	prefix  string
-	client  *s3.Client
-	presign *s3.PresignClient
+	bucket         string
+	prefix         string
+	client         *s3.Client
+	presign        *s3.PresignClient
+	maxObjectBytes int64
 }
 
 func NewSeaweedFSStore(ctx context.Context, endpoint, publicEndpoint, region, bucket, prefix, accessKey, secretKey string) (*SeaweedFSStore, error) {
@@ -46,7 +50,7 @@ func NewSeaweedFSStore(ctx context.Context, endpoint, publicEndpoint, region, bu
 	if strings.TrimSpace(publicEndpoint) == "" {
 		publicEndpoint = endpoint
 	}
-	return &SeaweedFSStore{bucket: bucket, prefix: strings.Trim(strings.TrimSpace(prefix), "/"), client: client, presign: s3.NewPresignClient(clientFor(publicEndpoint))}, nil
+	return &SeaweedFSStore{bucket: bucket, prefix: strings.Trim(strings.TrimSpace(prefix), "/"), client: client, presign: s3.NewPresignClient(clientFor(publicEndpoint)), maxObjectBytes: defaultMaxSeaweedObjectBytes}, nil
 }
 
 func (s *SeaweedFSStore) objectKey(key string) string {
@@ -58,10 +62,36 @@ func (s *SeaweedFSStore) objectKey(key string) string {
 }
 
 func (s *SeaweedFSStore) Put(ctx context.Context, key, contentType string, reader io.Reader) (ObjectMetadata, error) {
+	// The AWS SDK cannot sign a trailing checksum for an unseekable stream over
+	// the cluster-internal HTTP endpoint. Spool into a bounded, private file so
+	// the SDK can calculate the checksum before upload without buffering derived
+	// video exports in memory. Inbound request bodies remain independently
+	// constrained by HTTP_BODY_LIMIT_BYTES.
+	spool, err := os.CreateTemp("", "kwanni-seaweed-put-*")
+	if err != nil {
+		return ObjectMetadata{}, fmt.Errorf("create SeaweedFS upload spool: %w", err)
+	}
+	spoolName := spool.Name()
+	defer os.Remove(spoolName)
+	defer spool.Close()
+
+	limit := s.maxObjectBytes
+	if limit <= 0 {
+		limit = defaultMaxSeaweedObjectBytes
+	}
 	hash := sha256.New()
 	counter := &countWriter{}
-	body := io.TeeReader(reader, io.MultiWriter(hash, counter))
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.objectKey(key)), ContentType: aws.String(contentType), Body: body})
+	written, err := io.Copy(io.MultiWriter(spool, hash, counter), io.LimitReader(reader, limit+1))
+	if err != nil {
+		return ObjectMetadata{}, fmt.Errorf("spool SeaweedFS object: %w", err)
+	}
+	if written == 0 || written > limit {
+		return ObjectMetadata{}, fmt.Errorf("SeaweedFS object must be between 1 and %d bytes", limit)
+	}
+	if _, err := spool.Seek(0, io.SeekStart); err != nil {
+		return ObjectMetadata{}, fmt.Errorf("rewind SeaweedFS upload spool: %w", err)
+	}
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{Bucket: aws.String(s.bucket), Key: aws.String(s.objectKey(key)), ContentType: aws.String(contentType), ContentLength: aws.Int64(written), Body: spool})
 	if err != nil {
 		return ObjectMetadata{}, fmt.Errorf("put SeaweedFS object: %w", err)
 	}
