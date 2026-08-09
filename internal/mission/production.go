@@ -49,6 +49,11 @@ type FallbackPlanner struct {
 func (p FallbackPlanner) Plan(ctx context.Context, request PlanRequest) (PlanResult, error) {
 	if p.Primary != nil {
 		if result, err := p.Primary.Plan(ctx, request); err == nil && safeGeneratedContent(CaptionResult{Caption: result.Caption, CTA: result.CTA, Hashtags: result.Hashtags}) && validateProductionSpec(result.ProductionSpec) == nil {
+			// Brand Guard is deterministic at the publication boundary. Qwen owns
+			// the creative production plan, but user-facing product claims are
+			// rebuilt only from operator-verified fields so plausible adjectives
+			// (for example "durable") cannot silently become product facts.
+			result.Caption, result.CTA, result.Hashtags = verifiedProductCopy(request.Product)
 			return result, nil
 		}
 	}
@@ -57,6 +62,24 @@ func (p FallbackPlanner) Plan(ctx context.Context, request PlanRequest) (PlanRes
 		fallback = CaptionBackedPlanner{Captions: FallbackCaptioner{}}
 	}
 	return fallback.Plan(ctx, request)
+}
+
+func verifiedProductCopy(product Product) (string, string, []string) {
+	parts := []string{strings.TrimSpace(product.Name) + ": " + strings.TrimSpace(product.Description)}
+	if facts := cleanStrings(product.Facts); len(facts) > 0 {
+		parts = append(parts, "ข้อมูลที่ผู้ใช้ระบุ: "+strings.Join(facts, " · "))
+	}
+	if price := strings.TrimSpace(product.Price); price != "" {
+		parts = append(parts, "ราคาที่ผู้ใช้ระบุ: "+price)
+	}
+	if promotion := strings.TrimSpace(product.Promotion); promotion != "" {
+		parts = append(parts, "โปรโมชั่นที่ผู้ใช้ระบุ: "+promotion)
+	}
+	caption := strings.Join(parts, "\n")
+	if runes := []rune(caption); len(runes) > 500 {
+		caption = string(runes[:497]) + "..."
+	}
+	return caption, "ดูรายละเอียดสินค้าจากลิงก์ที่แนบไว้", []string{"#ลองแล้วบอกต่อ", "#Affiliate"}
 }
 
 func deterministicProductionSpec(product Product, guides []Shot) ProductionSpec {
