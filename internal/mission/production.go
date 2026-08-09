@@ -265,7 +265,8 @@ func compileNaturalVideoPrompt(spec ProductionSpec, heading, command string) str
 	lines := []string{
 		heading,
 		command,
-		"Use the attached product image as the exact visual reference and first-frame identity anchor. Preserve its real color, geometry, material, label, and logo in every shot.",
+		"INPUT REQUIREMENT: Attach the original KWANNI product image to this same generation request using the image/referenceImages input. If the image is not attached, do not generate the video; ask for the original image instead.",
+		"IMAGE-TO-VIDEO FIDELITY: Animate the attached original image. Treat it as the exact product asset and first-frame identity anchor. Do not redesign, reconstruct, restyle, relabel, recolor, resize, simplify, or replace the product. Preserve its exact silhouette, proportions, material, surface details, button/layout count, printed text, label, and logo in every frame.",
 		fmt.Sprintf("Create one %d-second vertical 9:16, 1080p, photorealistic TikTok product commercial for %q. Premium cinematic e-commerce look, natural skin and hand motion, realistic physics, clean composition, soft natural 5200K key light, shallow depth of field, crisp product detail.", spec.DurationSeconds, product.Name),
 		"EDIT AND TIMELINE:",
 	}

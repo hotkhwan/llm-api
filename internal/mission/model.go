@@ -170,6 +170,7 @@ type ProductReference struct {
 	ContentType string `json:"contentType"`
 	Bytes       int64  `json:"bytes"`
 	SHA256      string `json:"sha256"`
+	DownloadURL string `json:"downloadUrl,omitempty"`
 }
 
 type Clip struct {

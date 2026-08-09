@@ -130,7 +130,7 @@ func TestDraftRequiresProductReference(t *testing.T) {
 }
 
 func TestImageFirstDraftNeedsOnlyOneReferenceAndReturnsVersionedProviderPrompts(t *testing.T) {
-	service := NewService(NewMemoryRepository(), MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "image-first" })
+	service := NewService(NewMemoryRepository(), signingMemoryStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "image-first" })
 	m, err := service.CreateWithConsentAndLocale(context.Background(), "u", Product{Name: "收纳盒", Description: "用于收纳小物", Facts: []string{"白色"}}, "v1", LocaleChinese)
 	if err != nil {
 		t.Fatal(err)
@@ -141,6 +141,9 @@ func TestImageFirstDraftNeedsOnlyOneReferenceAndReturnsVersionedProviderPrompts(
 	}
 	if m.State != StateMissionAccepted || len(m.Assets) != 0 {
 		t.Fatalf("reference should not masquerade as a manual shot: %#v", m)
+	}
+	if len(m.ProductReferences) != 1 || m.ProductReferences[0].DownloadURL == "" {
+		t.Fatalf("original reference must be retrievable for image-to-video: %#v", m.ProductReferences)
 	}
 	m, err = service.GenerateDraft(context.Background(), m.ID)
 	if err != nil {
@@ -164,6 +167,10 @@ func TestImageFirstDraftNeedsOnlyOneReferenceAndReturnsVersionedProviderPrompts(
 	}
 	if m.VisualQC != nil {
 		t.Fatalf("visual QC enqueued before an actual export: %#v", m.VisualQC)
+	}
+	got, err := service.Get(context.Background(), m.ID)
+	if err != nil || got.ProductReferences[0].DownloadURL == "" {
+		t.Fatalf("authenticated GET must renew product reference URL: %#v err=%v", got.ProductReferences, err)
 	}
 	if _, err := service.Export(context.Background(), m.ID); err == nil {
 		t.Fatal("legacy FFmpeg export accepted an image-first draft without shot assets")

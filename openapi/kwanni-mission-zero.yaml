@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: KWANNI Mission Zero API
-  version: 0.4.1
+  version: 0.4.2
   description: Image-first Mission Zero API. It does not promise sales or income.
 servers:
   - url: /v1
@@ -236,7 +236,7 @@ components:
           enum: [missionAccepted, captureStarted, assetsUploaded, draftGenerating, draftReady, exportQueued, exported, posted, resultRecorded, nextMissionReady]
         shots: { type: array, items: { type: object } }
         assets: { type: array, items: { type: object } }
-        productReferences: { type: array, items: { type: object } }
+        productReferences: { type: array, items: { $ref: '#/components/schemas/ProductReference' } }
         draft: { $ref: '#/components/schemas/Draft' }
         export: { $ref: '#/components/schemas/ExportArtifact' }
         exportJob: { $ref: '#/components/schemas/ProcessingJob' }
@@ -271,6 +271,16 @@ components:
               role: { type: string, enum: [creativeDirector, storyDirector, brandGuard, productionPlanner, promptCompiler] }
               runtime: { type: string }
         renderPrompts: { $ref: '#/components/schemas/RenderPrompts' }
+    ProductReference:
+      type: object
+      required: [index, storageKey, contentType, bytes, sha256]
+      properties:
+        index: { type: integer, minimum: 1 }
+        storageKey: { type: string }
+        contentType: { type: string, enum: [image/jpeg, image/png, image/webp] }
+        bytes: { type: integer, format: int64, minimum: 1 }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        downloadUrl: { type: string, format: uri, description: Short-lived URL for attaching the exact original image to an image-to-video request. }
     RenderPrompts:
       type: object
       required: [veo, seedance]

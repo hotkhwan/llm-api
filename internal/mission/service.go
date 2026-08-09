@@ -79,6 +79,7 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 	if m.Locale == "" {
 		m.Locale = LocaleThai
 	}
+	s.attachProductReferenceURLs(ctx, &m)
 	if isPostExportState(m.State) && m.Export != nil {
 		if err := s.reconcileVisualQC(ctx, &m); err != nil {
 			m.VisualQC = visualQCWarning(m.VisualQC, "Visual QC unavailable; review the exported video manually")
@@ -213,6 +214,7 @@ func (s *Service) UploadProductReference(ctx context.Context, id string, index i
 	for position, asset := range m.ProductReferences {
 		if asset.Index == index {
 			if asset.SHA256 == digest && asset.ContentType == contentType {
+				s.attachProductReferenceURLs(ctx, &m)
 				return m, nil
 			}
 			replaceAt = position
@@ -241,6 +243,7 @@ func (s *Service) UploadProductReference(ctx context.Context, id string, index i
 	if err := s.audit(ctx, m.ID, action, m.State, m.State); err != nil {
 		return Mission{}, err
 	}
+	s.attachProductReferenceURLs(ctx, &m)
 	return m, nil
 }
 
@@ -309,6 +312,7 @@ func (s *Service) GenerateDraft(ctx context.Context, id string) (Mission, error)
 	if err := s.audit(ctx, m.ID, "draft.generated", from, m.State); err != nil {
 		return Mission{}, err
 	}
+	s.attachProductReferenceURLs(ctx, &m)
 	return m, nil
 }
 
@@ -504,6 +508,12 @@ func (s *Service) downloadURL(ctx context.Context, key string) string {
 		return value
 	}
 	return ""
+}
+
+func (s *Service) attachProductReferenceURLs(ctx context.Context, mission *Mission) {
+	for index := range mission.ProductReferences {
+		mission.ProductReferences[index].DownloadURL = s.downloadURL(ctx, mission.ProductReferences[index].StorageKey)
+	}
 }
 
 func (s *Service) RecordOutcome(ctx context.Context, id string, views, clicks, sales int64) (Mission, error) {
