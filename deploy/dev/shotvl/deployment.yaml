@@ -22,6 +22,9 @@ spec:
         app.kubernetes.io/component: visual-qc
     spec:
       serviceAccountName: kwanni-shotvl
+      # K3s keeps NVIDIA as a named runtime; default runc cannot expose
+      # NVML/CUDA on DGX Spark.
+      runtimeClassName: nvidia
       automountServiceAccountToken: false
       enableServiceLinks: false
       terminationGracePeriodSeconds: 45

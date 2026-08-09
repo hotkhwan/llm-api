@@ -105,6 +105,9 @@ the host cache root-owned mode `0750`; the serving mount is read-only, Linux
 capabilities are dropped, privilege escalation is disabled, and the pod has no
 service-account token. Confirm the point-DGX node label is
 `kubernetes.io/arch=arm64` and that the NVIDIA device plugin advertises one GPU.
+Both the NVIDIA device-plugin DaemonSet and this Deployment must use the K3s
+`runtimeClassName: nvidia`; a Running plugin under default runc can report no
+allocatable GPU even though host `nvidia-smi` succeeds.
 
 Registry inspection of the pinned ARM64 child manifest resolved config digest
 `sha256:46591c6e4a018d8d197fa246b1e3d682c907654aab4e9402302abb3e6a7dd916`.
