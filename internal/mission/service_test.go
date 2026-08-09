@@ -152,8 +152,15 @@ func TestImageFirstDraftNeedsOnlyOneReferenceAndReturnsVersionedProviderPrompts(
 	if m.Draft.RenderPrompts.Veo.AdapterVersion != VeoAdapterVersion || m.Draft.RenderPrompts.Seedance.AdapterVersion != SeedanceAdapterVersion {
 		t.Fatalf("render prompts = %#v", m.Draft.RenderPrompts)
 	}
-	if !strings.Contains(m.Draft.RenderPrompts.Veo.Prompt, "根据此 JSON 规格生成竖屏视频") || !strings.Contains(m.Draft.RenderPrompts.Veo.Prompt, `"verifiedFacts":["用于收纳小物","白色"]`) {
-		t.Fatalf("localized grounded Veo prompt = %q", m.Draft.RenderPrompts.Veo.Prompt)
+	veo := m.Draft.RenderPrompts.Veo.Prompt
+	if !strings.HasPrefix(veo, "VEO VIDEO GENERATION COMMAND\nGenerate the video now.") || !strings.Contains(veo, "VERIFIED PRODUCT CONTEXT") || !strings.Contains(veo, "用于收纳小物; 白色") {
+		t.Fatalf("provider-native grounded Veo prompt = %q", veo)
+	}
+	if strings.Contains(veo, "Canonical Production Spec JSON") || strings.Contains(veo, `"schemaVersion"`) || !strings.Contains(veo, "FINAL OUTPUT: one finished video only.") {
+		t.Fatalf("Veo prompt must command generation instead of inviting an analysis: %q", veo)
+	}
+	if !strings.HasPrefix(m.Draft.RenderPrompts.Seedance.Prompt, "SEEDANCE MULTI-SHOT VIDEO GENERATION COMMAND") {
+		t.Fatalf("provider-native Seedance prompt = %q", m.Draft.RenderPrompts.Seedance.Prompt)
 	}
 	if m.VisualQC != nil {
 		t.Fatalf("visual QC enqueued before an actual export: %#v", m.VisualQC)

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: KWANNI Mission Zero API
-  version: 0.4.0
+  version: 0.4.1
   description: Image-first Mission Zero API. It does not promise sales or income.
 servers:
   - url: /v1
@@ -284,7 +284,7 @@ components:
         provider: { type: string, enum: [veo, seedance] }
         adapterVersion:
           type: string
-          enum: [kwanni.veo/v1, kwanni.seedance/v1]
+          enum: [kwanni.veo/v2, kwanni.seedance/v2]
         prompt: { type: string, minLength: 1 }
     ProductionSpec:
       type: object

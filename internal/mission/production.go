@@ -2,7 +2,6 @@ package mission
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -10,8 +9,8 @@ import (
 const ProductionSpecSchemaVersion = "kwanni.production/v1"
 
 const (
-	VeoAdapterVersion      = "kwanni.veo/v1"
-	SeedanceAdapterVersion = "kwanni.seedance/v1"
+	VeoAdapterVersion      = "kwanni.veo/v2"
+	SeedanceAdapterVersion = "kwanni.seedance/v2"
 )
 
 var defaultRoleExecutions = []RoleExecution{
@@ -116,19 +115,44 @@ func deterministicProductionSpecForLocale(product Product, guides []Shot, locale
 		facts = append(facts, localized(locale, "โปรโมชั่นที่ผู้ใช้ระบุ: ", "User-provided promotion: ", "用户提供的促销信息：")+strings.TrimSpace(product.Promotion))
 	}
 	shots := make([]ProductionShot, 0, len(guides))
+	actions := localizedList(locale,
+		[]string{
+			"เปิดด้วย hero reveal ของสินค้าจริง ให้เห็นรูปทรงและฉลากชัดเจน",
+			"มือของผู้ใช้สาธิตการใช้งานจริงตามข้อเท็จจริงของสินค้า เน้นรายละเอียดการสัมผัส",
+			"จบด้วย beauty close-up ของสินค้าจริง ฉลากหันเข้ากล้อง ให้ความรู้สึกน่าหยุดดูโดยไม่อวดอ้างเกินจริง",
+		},
+		[]string{
+			"Open with a cinematic hero reveal of the real product, clearly showing its shape and label",
+			"Show adult hands naturally demonstrating the verified product use, emphasizing tactile interaction",
+			"Finish on a satisfying beauty close-up of the real product with its label facing camera, without exaggerated claims",
+		},
+		[]string{
+			"以真实商品的电影感主角特写开场，清晰展示形状和标签",
+			"展示成年人的手自然演示经核实的商品用法，突出真实触感",
+			"以真实商品的质感特写收尾，标签朝向镜头，不夸大效果",
+		})
+	durations := []int{2, 3, 3}
 	for index, guide := range guides {
-		movement := "static"
-		shotSize := "medium"
+		movement := "smoothLateralSlide"
+		shotSize := "mediumCloseUp"
 		if index == 0 {
-			shotSize = "wide"
+			shotSize = "closeUp"
 		} else if index == len(guides)-1 {
 			movement = "slowPushIn"
-			shotSize = "closeUp"
+			shotSize = "macroCloseUp"
+		}
+		duration := 3
+		if index < len(durations) {
+			duration = durations[index]
+		}
+		action := guide.Instruction
+		if index < len(actions) {
+			action = actions[index]
 		}
 		shots = append(shots, ProductionShot{
 			ShotID: fmt.Sprintf("shot%02d", guide.Number), CaptureShot: guide.Number,
-			DurationSeconds: 3, ShotSize: shotSize, CameraAngle: "eyeLevel", LensMM: 50,
-			CameraMovement: movement, SubjectAction: guide.Instruction,
+			DurationSeconds: duration, ShotSize: shotSize, CameraAngle: "eyeLevel", LensMM: 50,
+			CameraMovement: movement, SubjectAction: action,
 			Composition: "centerWeighted",
 			Lighting:    ShotLighting{Style: "softNatural", KeyDirection: "cameraLeft", ColorTemperatureKelvin: 5200},
 			Continuity:  ShotContinuity{ProductOrientation: "labelFacingCamera", WardrobeID: "look01", LocationID: "set01"},
@@ -136,7 +160,7 @@ func deterministicProductionSpecForLocale(product Product, guides []Shot, locale
 	}
 	return ProductionSpec{
 		SchemaVersion: ProductionSpecSchemaVersion, ProjectType: "affiliateShort",
-		DurationSeconds: len(shots) * 3, Platform: "tiktok", AspectRatio: "9:16",
+		DurationSeconds: 8, Platform: "tiktok", AspectRatio: "9:16",
 		CreativeIntent: "truthfulProductDemo",
 		StoryBeats: localizedList(locale,
 			[]string{"แสดงปัญหาหรือสภาพก่อนใช้", "สาธิตการใช้สินค้าจริง", "แสดงผลหลังใช้โดยไม่กล่าวอ้างเกินข้อมูล"},
@@ -211,8 +235,7 @@ func localizedCaptureShots(locale Locale) []Shot {
 }
 
 func compileRenderPrompts(spec ProductionSpec, locale Locale) (RenderPrompts, error) {
-	locale, err := normalizeLocale(locale)
-	if err != nil {
+	if _, err := normalizeLocale(locale); err != nil {
 		return RenderPrompts{}, err
 	}
 	if err := validateProductionSpec(spec); err != nil {
@@ -221,25 +244,47 @@ func compileRenderPrompts(spec ProductionSpec, locale Locale) (RenderPrompts, er
 	if len(spec.Continuity.Product.ReferenceKeys) != 1 {
 		return RenderPrompts{}, fmt.Errorf("render adapters require exactly one product reference")
 	}
-	canonical := spec
-	canonical.ProviderPrompts = nil
-	encoded, err := json.Marshal(canonical)
-	if err != nil {
-		return RenderPrompts{}, fmt.Errorf("encode canonical production spec: %w", err)
-	}
-	veoInstruction := localized(locale,
-		"สร้างวิดีโอแนวตั้งจากสเปก JSON นี้ ยึดภาพสินค้าอ้างอิงเป็นความจริงด้านภาพ รักษาสินค้า ตัวละคร เสื้อผ้า สถานที่ แสง และกล้องให้ต่อเนื่องครบ 3 ช็อต ห้ามเพิ่มคำกล่าวอ้างที่ไม่มีใน verifiedFacts",
-		"Create a vertical video from this JSON spec. Treat the product reference as visual truth. Preserve product, character, wardrobe, location, lighting, and camera continuity across all three shots. Do not add claims absent from verifiedFacts.",
-		"根据此 JSON 规格生成竖屏视频。以商品参考图为视觉事实依据，确保三个镜头中的商品、人物、服装、场景、灯光和摄影连续一致。不得添加 verifiedFacts 中没有的宣传内容。")
-	seedanceInstruction := localized(locale,
-		"เรนเดอร์วิดีโอ 9:16 ตามลำดับ 3 ช็อตในสเปก JSON นี้ ใช้ภาพสินค้าอ้างอิงล็อกสี รูปทรง ฉลาก และโลโก้ ทำตามเวลา การเคลื่อนกล้อง และ continuity ทุกข้อ ห้ามสร้างคุณสมบัติหรือผลลัพธ์ใหม่",
-		"Render a 9:16 video following the three-shot sequence in this JSON spec. Use the product reference to lock color, shape, label, and logo. Follow timing, camera movement, and every continuity constraint. Do not invent features or outcomes.",
-		"按照此 JSON 规格中的三个镜头顺序渲染 9:16 视频。使用商品参考图锁定颜色、形状、标签和品牌标志，并遵循时长、镜头运动及全部连续性约束。不得虚构功能或效果。")
-	heading := localized(locale, "Canonical Production Spec JSON (ข้อมูลหลัก):", "Canonical Production Spec JSON:", "标准制作规格 JSON：")
+	veoInstruction := compileVeoPrompt(spec)
+	seedanceInstruction := compileSeedancePrompt(spec)
 	return RenderPrompts{
-		Veo:      RenderPrompt{Provider: "veo", AdapterVersion: VeoAdapterVersion, Prompt: veoInstruction + "\n" + heading + "\n" + string(encoded)},
-		Seedance: RenderPrompt{Provider: "seedance", AdapterVersion: SeedanceAdapterVersion, Prompt: seedanceInstruction + "\n" + heading + "\n" + string(encoded)},
+		Veo:      RenderPrompt{Provider: "veo", AdapterVersion: VeoAdapterVersion, Prompt: veoInstruction},
+		Seedance: RenderPrompt{Provider: "seedance", AdapterVersion: SeedanceAdapterVersion, Prompt: seedanceInstruction},
 	}, nil
+}
+
+func compileVeoPrompt(spec ProductionSpec) string {
+	return compileNaturalVideoPrompt(spec, "VEO VIDEO GENERATION COMMAND", "Generate the video now. Do not analyze, explain, rewrite, summarize, or return a production plan. Return the generated video only.")
+}
+
+func compileSeedancePrompt(spec ProductionSpec) string {
+	return compileNaturalVideoPrompt(spec, "SEEDANCE MULTI-SHOT VIDEO GENERATION COMMAND", "Generate one cohesive multi-shot video now. Do not answer with text, analysis, or a shot breakdown. Return the generated video only.")
+}
+
+func compileNaturalVideoPrompt(spec ProductionSpec, heading, command string) string {
+	product := spec.Continuity.Product
+	lines := []string{
+		heading,
+		command,
+		"Use the attached product image as the exact visual reference and first-frame identity anchor. Preserve its real color, geometry, material, label, and logo in every shot.",
+		fmt.Sprintf("Create one %d-second vertical 9:16, 1080p, photorealistic TikTok product commercial for %q. Premium cinematic e-commerce look, natural skin and hand motion, realistic physics, clean composition, soft natural 5200K key light, shallow depth of field, crisp product detail.", spec.DurationSeconds, product.Name),
+		"EDIT AND TIMELINE:",
+	}
+	start := 0
+	for index, shot := range spec.Shots {
+		end := start + shot.DurationSeconds
+		lines = append(lines, fmt.Sprintf("%d. %0.1f-%0.1fs — %s; %s, %s, %dmm lens, %s. Product label faces camera; transition smoothly into the next shot.", index+1, float64(start), float64(end), strings.TrimSpace(shot.SubjectAction), shot.ShotSize, shot.CameraAngle, shot.LensMM, shot.CameraMovement))
+		start = end
+	}
+	if len(product.VerifiedFacts) > 0 {
+		lines = append(lines, "VERIFIED PRODUCT CONTEXT (do not turn this into extra on-screen text): "+strings.Join(product.VerifiedFacts, "; "))
+	}
+	lines = append(lines,
+		"AUDIO: satisfying, realistic product interaction sounds synchronized to the hands; subtle modern commercial music; no narration and no dialogue.",
+		"CONTINUITY: exactly the same product and same adult hands across all shots. Keep branding and label legible whenever visible. The product remains the hero; no unrelated props or scene changes.",
+		"AVOID: explanatory text response, storyboard panels, split screen, subtitles, captions, floating typography, extra fingers, warped hands, duplicate products, altered logo, altered label, changed colors, deformed geometry, flicker, jump cuts, camera shake, invented features, invented results, or income claims.",
+		"FINAL OUTPUT: one finished video only.",
+	)
+	return strings.Join(lines, "\n")
 }
 
 func cleanStrings(values []string) []string {

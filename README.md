@@ -1,6 +1,6 @@
 # KWANNI API
 
-Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.3.0`
+Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.4.1`
 implements the first durable end-to-end Mission Zero slice:
 
 `manual product → product reference → mission → 3-shot capture → draft → export → mark posted → outcome → next action`

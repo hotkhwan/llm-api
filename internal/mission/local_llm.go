@@ -48,11 +48,12 @@ func (g OpenAICompatiblePlanner) Plan(ctx context.Context, request PlanRequest) 
 	skeletonJSON, _ := json.Marshal(skeleton)
 	referencesJSON, _ := json.Marshal(request.ProductReferences)
 	language := localized(locale, "Thai", "English", "Simplified Chinese")
-	prompt := fmt.Sprintf(`Act through these roles in one shared runtime: creativeDirector, storyDirector, brandGuard, productionPlanner, promptCompiler.
-Return one JSON object with keys caption, cta, hashtags, productionSpec. productionSpec must preserve schemaVersion %q, exactly 3 shots, 9:16, 6-25 seconds and all continuity bible fields.
+	prompt := fmt.Sprintf(`Act through these roles in one shared runtime: creativeDirector, storyDirector, cinematographyDirector, lightingDirector, brandGuard, productionPlanner, promptCompiler.
+Return one JSON object with keys caption, cta, hashtags, productionSpec. productionSpec must preserve schemaVersion %q, exactly 3 shots, 9:16, exactly 8 seconds total and all continuity bible fields.
 Verified product JSON: %s
 Exactly one real product reference metadata JSON: %s
 Safe deterministic skeleton to improve without changing facts: %s
+Replace generic capture instructions with a cinematic commercial action for every shot. Never tell the user to "take a photo or video". Shot 1 must hook with a product hero reveal, shot 2 must demonstrate only the verified use with tactile detail, and shot 3 must end on a premium product beauty close-up. Specify purposeful shot size, camera movement, composition and lighting while keeping the same product identity.
 Write all user-visible prose in %s (locale %s). Preserve product names and user-provided facts exactly as supplied; do not translate or alter them. Treat the real reference as the visual source of truth, while never claiming visual details that are absent from verified product JSON. Never invent price, promotion, product capability, sales result or income promise.`, ProductionSpecSchemaVersion, facts, referencesJSON, skeletonJSON, language, locale)
 	payload := map[string]any{
 		"model":                g.Model,
