@@ -56,7 +56,7 @@ func (v OpenAICompatibleVisualQC) Analyze(ctx context.Context, spec ProductionSp
 		frameIDs[frame.Evidence.ID] = true
 		content = append(content, map[string]any{"type": "text", "text": "evidenceFrameId=" + frame.Evidence.ID}, map[string]any{"type": "image_url", "image_url": map[string]string{"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(frame.JPEG)}})
 	}
-	payload := map[string]any{"model": v.Model, "temperature": 0.1, "max_tokens": 1536, "response_format": map[string]string{"type": "json_object"}, "messages": []map[string]any{{"role": "system", "content": "You are ShotVL, an advisory cinematic visual critic. Do not infer sales, income, or unseen product facts."}, {"role": "user", "content": content}}}
+	payload := map[string]any{"model": v.Model, "temperature": 0.1, "max_tokens": 1536, "response_format": visualQCResponseFormat(spec, frames), "messages": []map[string]any{{"role": "system", "content": "You are ShotVL, an advisory cinematic visual critic. Do not infer sales, income, or unseen product facts."}, {"role": "user", "content": content}}}
 	body, _ := json.Marshal(payload)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
@@ -107,6 +107,55 @@ func (v OpenAICompatibleVisualQC) Analyze(ctx context.Context, spec ProductionSp
 		return VisualQCReport{}, err
 	}
 	return report, nil
+}
+
+func visualQCResponseFormat(spec ProductionSpec, frames []VisualQCFrame) map[string]any {
+	shotIDs := make([]string, 0, len(spec.Shots))
+	for _, shot := range spec.Shots {
+		shotIDs = append(shotIDs, shot.ShotID)
+	}
+	frameIDs := make([]string, 0, len(frames))
+	for _, frame := range frames {
+		frameIDs = append(frameIDs, frame.Evidence.ID)
+	}
+	number := func() map[string]any { return map[string]any{"type": "number", "minimum": 0, "maximum": 1} }
+	metricKeys := []string{"shotSize", "composition", "cameraAngle", "depth", "lighting", "subjectPlacement", "productPlacement"}
+	metricProperties := make(map[string]any, len(metricKeys))
+	for _, key := range metricKeys {
+		metricProperties[key] = number()
+	}
+	schema := map[string]any{
+		"type": "object", "additionalProperties": false,
+		"required": []string{"score", "passed", "shots"},
+		"properties": map[string]any{
+			"score": number(), "passed": map[string]any{"type": "boolean"},
+			"shots": map[string]any{
+				"type": "array", "minItems": len(shotIDs), "maxItems": len(shotIDs),
+				"items": map[string]any{
+					"type": "object", "additionalProperties": false,
+					"required": []string{"shotId", "metrics", "defects"},
+					"properties": map[string]any{
+						"shotId":  map[string]any{"type": "string", "enum": shotIDs},
+						"metrics": map[string]any{"type": "object", "additionalProperties": false, "required": metricKeys, "properties": metricProperties},
+						"defects": map[string]any{
+							"type": "array", "maxItems": 1,
+							"items": map[string]any{
+								"type": "object", "additionalProperties": false,
+								"required": []string{"code", "severity", "message", "evidenceFrameIds"},
+								"properties": map[string]any{
+									"code":             map[string]any{"type": "string"},
+									"severity":         map[string]any{"type": "string", "enum": []string{"info", "warning", "critical"}},
+									"message":          map[string]any{"type": "string", "maxLength": 120},
+									"evidenceFrameIds": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": frameIDs}},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	return map[string]any{"type": "json_schema", "json_schema": map[string]any{"name": "visual_qc_report", "strict": true, "schema": schema}}
 }
 
 func decodeVisualQCReport(content string) (VisualQCReport, error) {

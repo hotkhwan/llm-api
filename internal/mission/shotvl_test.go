@@ -34,6 +34,10 @@ func TestOpenAICompatibleVisualQCValidatesStructuredEvidence(t *testing.T) {
 		if request["max_tokens"] != float64(1536) {
 			t.Fatalf("max_tokens = %#v", request["max_tokens"])
 		}
+		responseFormat, _ := request["response_format"].(map[string]any)
+		if responseFormat["type"] != "json_schema" {
+			t.Fatalf("response_format = %#v", responseFormat)
+		}
 		content, _ := json.Marshal(map[string]any{"score": .82, "passed": true, "shots": visualTestShots()})
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(content)}}}})
 	}))
