@@ -46,6 +46,26 @@ func TestOpenAICompatibleVisualQCValidatesStructuredEvidence(t *testing.T) {
 	}
 }
 
+func TestDecodeVisualQCReportNormalizesOnlyKnownScalarFields(t *testing.T) {
+	content, err := json.Marshal(map[string]any{
+		"score": "0.82", "passed": "true",
+		"shots": []any{map[string]any{
+			"shotId": "shot01",
+			"metrics": map[string]any{
+				"shotSize": "0.8", "composition": "0.7", "cameraAngle": "0.6",
+				"depth": "0.5", "lighting": "0.9", "subjectPlacement": "0.8", "productPlacement": "0.75",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := decodeVisualQCReport(string(content))
+	if err != nil || report.Score != .82 || !report.Passed || report.Shots[0].Metrics.ProductPlacement != .75 {
+		t.Fatalf("report=%#v err=%v", report, err)
+	}
+}
+
 type fakeVisualAnalyzer struct{}
 
 func (fakeVisualAnalyzer) Analyze(_ context.Context, spec ProductionSpec, frames []VisualQCFrame, revision int) (VisualQCReport, error) {

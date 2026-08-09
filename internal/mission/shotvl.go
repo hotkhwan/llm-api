@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -87,8 +88,8 @@ func (v OpenAICompatibleVisualQC) Analyze(ctx context.Context, spec ProductionSp
 	if err := json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&completion); err != nil || len(completion.Choices) == 0 {
 		return VisualQCReport{}, fmt.Errorf("invalid ShotVL completion")
 	}
-	var report VisualQCReport
-	if err := json.Unmarshal([]byte(completion.Choices[0].Message.Content), &report); err != nil {
+	report, err := decodeVisualQCReport(completion.Choices[0].Message.Content)
+	if err != nil {
 		return VisualQCReport{}, fmt.Errorf("decode ShotVL report: %w", err)
 	}
 	report.Revision = revision
@@ -106,6 +107,61 @@ func (v OpenAICompatibleVisualQC) Analyze(ctx context.Context, spec ProductionSp
 		return VisualQCReport{}, err
 	}
 	return report, nil
+}
+
+func decodeVisualQCReport(content string) (VisualQCReport, error) {
+	decoder := json.NewDecoder(strings.NewReader(content))
+	decoder.UseNumber()
+	var raw map[string]any
+	if err := decoder.Decode(&raw); err != nil {
+		return VisualQCReport{}, err
+	}
+	coerceJSONFloat(raw, "score")
+	coerceJSONBool(raw, "passed")
+	if shots, ok := raw["shots"].([]any); ok {
+		for _, value := range shots {
+			shot, ok := value.(map[string]any)
+			if !ok {
+				continue
+			}
+			metrics, ok := shot["metrics"].(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, key := range []string{"shotSize", "composition", "cameraAngle", "depth", "lighting", "subjectPlacement", "productPlacement"} {
+				coerceJSONFloat(metrics, key)
+			}
+		}
+	}
+	normalized, err := json.Marshal(raw)
+	if err != nil {
+		return VisualQCReport{}, err
+	}
+	var report VisualQCReport
+	if err := json.Unmarshal(normalized, &report); err != nil {
+		return VisualQCReport{}, err
+	}
+	return report, nil
+}
+
+func coerceJSONFloat(value map[string]any, key string) {
+	text, ok := value[key].(string)
+	if !ok {
+		return
+	}
+	if number, err := strconv.ParseFloat(strings.TrimSpace(text), 64); err == nil {
+		value[key] = number
+	}
+}
+
+func coerceJSONBool(value map[string]any, key string) {
+	text, ok := value[key].(string)
+	if !ok {
+		return
+	}
+	if boolean, err := strconv.ParseBool(strings.TrimSpace(text)); err == nil {
+		value[key] = boolean
+	}
 }
 
 func validateVisualQCReport(report VisualQCReport, spec ProductionSpec, frameIDs map[string]bool) error {
