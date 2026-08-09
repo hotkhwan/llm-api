@@ -252,20 +252,20 @@ func (s *Service) GenerateDraft(ctx context.Context, id string) (Mission, error)
 	if m.State == StateDraftReady || m.State == StateExportQueued || m.State == StateExported || m.State == StatePosted || m.State == StateResultRecorded || m.State == StateNextMissionReady {
 		return m, nil
 	}
-	if m.State != StateAssetsUploaded && m.State != StateDraftGenerating {
+	if m.State != StateMissionAccepted && m.State != StateCaptureStarted && m.State != StateAssetsUploaded && m.State != StateDraftGenerating {
 		return Mission{}, ErrInvalidState
 	}
-	if len(m.ProductReferences) == 0 {
-		return Mission{}, fmt.Errorf("at least one product reference image is required before draft generation")
+	if len(m.ProductReferences) != 1 {
+		return Mission{}, fmt.Errorf("exactly one product reference image is required before draft generation")
 	}
 	from := m.State
-	if m.State == StateAssetsUploaded {
+	if m.State != StateDraftGenerating {
 		m.State = StateDraftGenerating
 		if err := s.save(ctx, &m); err != nil {
 			return Mission{}, err
 		}
 	}
-	result, err := s.planner.Plan(ctx, PlanRequest{Product: m.Product, Shots: m.Shots, Locale: m.Locale})
+	result, err := s.planner.Plan(ctx, PlanRequest{Product: m.Product, Shots: m.Shots, ProductReferences: append([]ProductReference(nil), m.ProductReferences...), Locale: m.Locale})
 	if err != nil {
 		return Mission{}, err
 	}
@@ -275,6 +275,15 @@ func (s *Service) GenerateDraft(ctx context.Context, id string) (Mission, error)
 	result.ProductionSpec.Continuity.Product.ReferenceKeys = make([]string, 0, len(m.ProductReferences))
 	for _, reference := range m.ProductReferences {
 		result.ProductionSpec.Continuity.Product.ReferenceKeys = append(result.ProductionSpec.Continuity.Product.ReferenceKeys, reference.StorageKey)
+	}
+	renderPrompts, err := compileRenderPrompts(result.ProductionSpec, m.Locale)
+	if err != nil {
+		return Mission{}, err
+	}
+	// Keep the original map for early Alpha clients while making the typed,
+	// versioned adapter output authoritative in Draft.renderPrompts.
+	result.ProductionSpec.ProviderPrompts = map[string]string{
+		"veo": renderPrompts.Veo.Prompt, "seedance": renderPrompts.Seedance.Prompt,
 	}
 	if !safeGeneratedContent(CaptionResult{Caption: result.Caption, CTA: result.CTA, Hashtags: result.Hashtags}) {
 		return Mission{}, fmt.Errorf("planner returned unsafe generated content")
@@ -288,7 +297,7 @@ func (s *Service) GenerateDraft(ctx context.Context, id string) (Mission, error)
 	for _, asset := range assets {
 		timeline = append(timeline, Clip{Shot: asset.Shot, StorageKey: asset.StorageKey, StartMS: 0, EndMS: 3000})
 	}
-	m.Draft = &Draft{Caption: result.Caption, CTA: result.CTA, Hashtags: result.Hashtags, Timeline: timeline, GeneratedBy: result.Provider, ProductionSpec: result.ProductionSpec, RoleExecutions: result.Roles}
+	m.Draft = &Draft{Caption: result.Caption, CTA: result.CTA, Hashtags: result.Hashtags, Timeline: timeline, GeneratedBy: result.Provider, ProductionSpec: result.ProductionSpec, RoleExecutions: result.Roles, RenderPrompts: renderPrompts}
 	m.State = StateDraftReady
 	if err := s.save(ctx, &m); err != nil {
 		return Mission{}, err
@@ -316,6 +325,9 @@ func (s *Service) Export(ctx context.Context, id string) (Mission, error) {
 	}
 	if m.State != StateDraftReady && m.State != StateExportQueued {
 		return Mission{}, ErrInvalidState
+	}
+	if m.State == StateDraftReady && len(m.Assets) != 3 {
+		return Mission{}, fmt.Errorf("legacy FFmpeg export requires all three uploaded shot assets; use a provider render prompt for an image-first mission")
 	}
 	from := m.State
 	outputKey := path.Join("missions", m.ID, "exports", "first-post.mp4")

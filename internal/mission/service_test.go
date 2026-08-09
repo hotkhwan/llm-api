@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -128,6 +129,57 @@ func TestDraftRequiresProductReference(t *testing.T) {
 	}
 }
 
+func TestImageFirstDraftNeedsOnlyOneReferenceAndReturnsVersionedProviderPrompts(t *testing.T) {
+	service := NewService(NewMemoryRepository(), MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "image-first" })
+	m, err := service.CreateWithConsentAndLocale(context.Background(), "u", Product{Name: "收纳盒", Description: "用于收纳小物", Facts: []string{"白色"}}, "v1", LocaleChinese)
+	if err != nil {
+		t.Fatal(err)
+	}
+	photo := []byte{0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00}
+	if m, err = service.UploadProductReference(context.Background(), m.ID, 1, "image/jpeg", photo); err != nil {
+		t.Fatal(err)
+	}
+	if m.State != StateMissionAccepted || len(m.Assets) != 0 {
+		t.Fatalf("reference should not masquerade as a manual shot: %#v", m)
+	}
+	m, err = service.GenerateDraft(context.Background(), m.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.State != StateDraftReady || m.Draft == nil || len(m.Draft.Timeline) != 0 || len(m.Draft.ProductionSpec.Shots) != 3 {
+		t.Fatalf("image-first draft = %#v", m)
+	}
+	if m.Draft.RenderPrompts.Veo.AdapterVersion != VeoAdapterVersion || m.Draft.RenderPrompts.Seedance.AdapterVersion != SeedanceAdapterVersion {
+		t.Fatalf("render prompts = %#v", m.Draft.RenderPrompts)
+	}
+	if !strings.Contains(m.Draft.RenderPrompts.Veo.Prompt, "根据此 JSON 规格生成竖屏视频") || !strings.Contains(m.Draft.RenderPrompts.Veo.Prompt, `"verifiedFacts":["用于收纳小物","白色"]`) {
+		t.Fatalf("localized grounded Veo prompt = %q", m.Draft.RenderPrompts.Veo.Prompt)
+	}
+	if m.VisualQC != nil {
+		t.Fatalf("visual QC enqueued before an actual export: %#v", m.VisualQC)
+	}
+	if _, err := service.Export(context.Background(), m.ID); err == nil {
+		t.Fatal("legacy FFmpeg export accepted an image-first draft without shot assets")
+	}
+}
+
+func TestImageFirstDraftRejectsMoreThanOneProductReference(t *testing.T) {
+	service := NewService(NewMemoryRepository(), MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "too-many" })
+	m, err := service.Create(context.Background(), "u", Product{Name: "Box", Description: "Stores items"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	photo := []byte{0xFF, 0xD8, 0xFF, 0xDB, 0x00, 0x43, 0x00}
+	for index := 1; index <= 2; index++ {
+		if _, err := service.UploadProductReference(context.Background(), m.ID, index, "image/jpeg", append(photo, byte(index))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := service.GenerateDraft(context.Background(), m.ID); err == nil || !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("draft error = %v", err)
+	}
+}
+
 func TestProductReferencePutIsIdempotentAndReplaceableBeforeDraft(t *testing.T) {
 	service := NewService(NewMemoryRepository(), MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "id" })
 	m, err := service.Create(context.Background(), "u", Product{Name: "สินค้า", Description: "ข้อมูลจริง"})
@@ -165,8 +217,8 @@ func TestFirstMissionRejectsOutOfOrderAndDuplicateActions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.GenerateDraft(ctx, m.ID); !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("draft before capture error = %v", err)
+	if _, err := service.GenerateDraft(ctx, m.ID); err == nil || !strings.Contains(err.Error(), "exactly one product reference") {
+		t.Fatalf("draft without product reference error = %v", err)
 	}
 	if _, err := service.Upload(ctx, m.ID, 1, "text/plain", []byte("bad")); err == nil {
 		t.Fatal("accepted non-media upload")

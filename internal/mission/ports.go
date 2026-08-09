@@ -58,9 +58,10 @@ type CaptionRequest struct {
 }
 
 type PlanRequest struct {
-	Product Product
-	Shots   []Shot
-	Locale  Locale
+	Product           Product
+	Shots             []Shot
+	ProductReferences []ProductReference
+	Locale            Locale
 }
 
 type PlanResult struct {

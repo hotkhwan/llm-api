@@ -1,8 +1,8 @@
 openapi: 3.1.0
 info:
   title: KWANNI Mission Zero API
-  version: 0.3.0
-  description: First Mission API. It does not promise sales or income.
+  version: 0.4.0
+  description: Image-first Mission Zero API. It does not promise sales or income.
 servers:
   - url: /v1
 security:
@@ -48,7 +48,7 @@ paths:
         schema: { type: integer, minimum: 1, maximum: 3 }
     put:
       operationId: uploadShot
-      summary: Upload one raw image or video for a guided shot
+      summary: Upload one optional legacy image or video for a guided shot
       requestBody:
         required: true
         content:
@@ -71,7 +71,8 @@ paths:
         schema: { type: integer, minimum: 1, maximum: 5 }
     put:
       operationId: putProductReference
-      summary: Upload or replace a real product reference image before drafting
+      summary: Upload or replace the one real product reference image required before drafting
+      description: Image-first clients use index 1. Indices 2-5 remain accepted for legacy upload compatibility, but a new Draft requires exactly one reference.
       requestBody:
         required: true
         content:
@@ -85,9 +86,10 @@ paths:
     parameters: [ { $ref: '#/components/parameters/MissionId' } ]
     post:
       operationId: generateDraft
+      summary: Generate a three-shot CPS and versioned Veo/Seedance prompts from product facts and one reference image
       responses:
         '200':
-          description: Caption and deterministic edit plan are ready
+          description: Localized caption, three-shot Canonical Production Spec, and deterministic provider prompts are ready
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Mission' }
@@ -247,12 +249,17 @@ components:
         updatedAt: { type: string, format: date-time }
     Draft:
       type: object
-      required: [caption, cta, hashtags, timeline, generatedBy, productionSpec, roleExecutions]
+      required: [caption, cta, hashtags, timeline, generatedBy, productionSpec, roleExecutions, renderPrompts]
       properties:
         caption: { type: string, maxLength: 500 }
         cta: { type: string }
         hashtags: { type: array, maxItems: 12, items: { type: string } }
-        timeline: { type: array, minItems: 3, maxItems: 3, items: { type: object } }
+        timeline:
+          description: Optional legacy manual-shot edit timeline; empty for the image-first flow.
+          type: array
+          minItems: 0
+          maxItems: 3
+          items: { type: object }
         generatedBy: { type: string }
         productionSpec: { $ref: '#/components/schemas/ProductionSpec' }
         roleExecutions:
@@ -263,6 +270,22 @@ components:
             properties:
               role: { type: string, enum: [creativeDirector, storyDirector, brandGuard, productionPlanner, promptCompiler] }
               runtime: { type: string }
+        renderPrompts: { $ref: '#/components/schemas/RenderPrompts' }
+    RenderPrompts:
+      type: object
+      required: [veo, seedance]
+      properties:
+        veo: { $ref: '#/components/schemas/RenderPrompt' }
+        seedance: { $ref: '#/components/schemas/RenderPrompt' }
+    RenderPrompt:
+      type: object
+      required: [provider, adapterVersion, prompt]
+      properties:
+        provider: { type: string, enum: [veo, seedance] }
+        adapterVersion:
+          type: string
+          enum: [kwanni.veo/v1, kwanni.seedance/v1]
+        prompt: { type: string, minLength: 1 }
     ProductionSpec:
       type: object
       required: [schemaVersion, projectType, durationSeconds, platform, aspectRatio, creativeIntent, storyBeats, continuity, shots]

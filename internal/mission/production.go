@@ -2,11 +2,17 @@ package mission
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
 const ProductionSpecSchemaVersion = "kwanni.production/v1"
+
+const (
+	VeoAdapterVersion      = "kwanni.veo/v1"
+	SeedanceAdapterVersion = "kwanni.seedance/v1"
+)
 
 var defaultRoleExecutions = []RoleExecution{
 	{Role: RoleCreativeDirector, Runtime: "shared-qwen"},
@@ -202,6 +208,38 @@ func localizedCaptureShots(locale Locale) []Shot {
 	default:
 		return []Shot{{1, "ถ่ายภาพหรือคลิปก่อนใช้สินค้า"}, {2, "ถ่ายตอนกำลังใช้สินค้า"}, {3, "ถ่ายผลลัพธ์หลังใช้สินค้า"}}
 	}
+}
+
+func compileRenderPrompts(spec ProductionSpec, locale Locale) (RenderPrompts, error) {
+	locale, err := normalizeLocale(locale)
+	if err != nil {
+		return RenderPrompts{}, err
+	}
+	if err := validateProductionSpec(spec); err != nil {
+		return RenderPrompts{}, err
+	}
+	if len(spec.Continuity.Product.ReferenceKeys) != 1 {
+		return RenderPrompts{}, fmt.Errorf("render adapters require exactly one product reference")
+	}
+	canonical := spec
+	canonical.ProviderPrompts = nil
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return RenderPrompts{}, fmt.Errorf("encode canonical production spec: %w", err)
+	}
+	veoInstruction := localized(locale,
+		"สร้างวิดีโอแนวตั้งจากสเปก JSON นี้ ยึดภาพสินค้าอ้างอิงเป็นความจริงด้านภาพ รักษาสินค้า ตัวละคร เสื้อผ้า สถานที่ แสง และกล้องให้ต่อเนื่องครบ 3 ช็อต ห้ามเพิ่มคำกล่าวอ้างที่ไม่มีใน verifiedFacts",
+		"Create a vertical video from this JSON spec. Treat the product reference as visual truth. Preserve product, character, wardrobe, location, lighting, and camera continuity across all three shots. Do not add claims absent from verifiedFacts.",
+		"根据此 JSON 规格生成竖屏视频。以商品参考图为视觉事实依据，确保三个镜头中的商品、人物、服装、场景、灯光和摄影连续一致。不得添加 verifiedFacts 中没有的宣传内容。")
+	seedanceInstruction := localized(locale,
+		"เรนเดอร์วิดีโอ 9:16 ตามลำดับ 3 ช็อตในสเปก JSON นี้ ใช้ภาพสินค้าอ้างอิงล็อกสี รูปทรง ฉลาก และโลโก้ ทำตามเวลา การเคลื่อนกล้อง และ continuity ทุกข้อ ห้ามสร้างคุณสมบัติหรือผลลัพธ์ใหม่",
+		"Render a 9:16 video following the three-shot sequence in this JSON spec. Use the product reference to lock color, shape, label, and logo. Follow timing, camera movement, and every continuity constraint. Do not invent features or outcomes.",
+		"按照此 JSON 规格中的三个镜头顺序渲染 9:16 视频。使用商品参考图锁定颜色、形状、标签和品牌标志，并遵循时长、镜头运动及全部连续性约束。不得虚构功能或效果。")
+	heading := localized(locale, "Canonical Production Spec JSON (ข้อมูลหลัก):", "Canonical Production Spec JSON:", "标准制作规格 JSON：")
+	return RenderPrompts{
+		Veo:      RenderPrompt{Provider: "veo", AdapterVersion: VeoAdapterVersion, Prompt: veoInstruction + "\n" + heading + "\n" + string(encoded)},
+		Seedance: RenderPrompt{Provider: "seedance", AdapterVersion: SeedanceAdapterVersion, Prompt: seedanceInstruction + "\n" + heading + "\n" + string(encoded)},
+	}, nil
 }
 
 func cleanStrings(values []string) []string {

@@ -54,6 +54,20 @@ type ProductionSpec struct {
 	ProviderPrompts map[string]string `json:"providerPrompts,omitempty"`
 }
 
+// RenderPrompt is deterministic adapter output. It is deliberately separate
+// from model-authored ProductionSpec content so provider syntax and versions
+// remain stable and auditable.
+type RenderPrompt struct {
+	Provider       string `json:"provider"`
+	AdapterVersion string `json:"adapterVersion"`
+	Prompt         string `json:"prompt"`
+}
+
+type RenderPrompts struct {
+	Veo      RenderPrompt `json:"veo"`
+	Seedance RenderPrompt `json:"seedance"`
+}
+
 type ContinuityBible struct {
 	Product   ProductBible   `json:"product"`
 	Character CharacterBible `json:"character"`
@@ -173,6 +187,7 @@ type Draft struct {
 	GeneratedBy    string          `json:"generatedBy"`
 	ProductionSpec ProductionSpec  `json:"productionSpec"`
 	RoleExecutions []RoleExecution `json:"roleExecutions"`
+	RenderPrompts  RenderPrompts   `json:"renderPrompts"`
 }
 
 type Export struct {

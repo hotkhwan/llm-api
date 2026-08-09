@@ -46,12 +46,14 @@ func (g OpenAICompatiblePlanner) Plan(ctx context.Context, request PlanRequest) 
 	}
 	skeleton := deterministicProductionSpecForLocale(request.Product, request.Shots, locale)
 	skeletonJSON, _ := json.Marshal(skeleton)
+	referencesJSON, _ := json.Marshal(request.ProductReferences)
 	language := localized(locale, "Thai", "English", "Simplified Chinese")
 	prompt := fmt.Sprintf(`Act through these roles in one shared runtime: creativeDirector, storyDirector, brandGuard, productionPlanner, promptCompiler.
 Return one JSON object with keys caption, cta, hashtags, productionSpec. productionSpec must preserve schemaVersion %q, exactly 3 shots, 9:16, 6-25 seconds and all continuity bible fields.
 Verified product JSON: %s
+Exactly one real product reference metadata JSON: %s
 Safe deterministic skeleton to improve without changing facts: %s
-Write all user-visible prose in %s (locale %s). Preserve product names and user-provided facts exactly as supplied; do not translate or alter them. Never invent price, promotion, product capability, sales result or income promise.`, ProductionSpecSchemaVersion, facts, skeletonJSON, language, locale)
+Write all user-visible prose in %s (locale %s). Preserve product names and user-provided facts exactly as supplied; do not translate or alter them. Treat the real reference as the visual source of truth, while never claiming visual details that are absent from verified product JSON. Never invent price, promotion, product capability, sales result or income promise.`, ProductionSpecSchemaVersion, facts, referencesJSON, skeletonJSON, language, locale)
 	payload := map[string]any{
 		"model":                g.Model,
 		"temperature":          0.6,
