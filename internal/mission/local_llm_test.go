@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -29,7 +30,7 @@ func TestOpenAICompatibleCaptioner(t *testing.T) {
 func TestOpenAICompatiblePlannerUsesOneRuntimeAndBearerSecret(t *testing.T) {
 	product := Product{Name: "กล่อง", Description: "กล่องสีขาว"}
 	guides := []Shot{{1, "ก่อน"}, {2, "ใช้"}, {3, "หลัง"}}
-	spec := deterministicProductionSpec(product, guides)
+	spec := deterministicProductionSpecForLocale(product, guides, LocaleChinese)
 	content, _ := json.Marshal(map[string]any{"caption": "ลองกล่องจากข้อมูลจริง", "cta": "ดูรายละเอียด", "hashtags": []string{"#ลอง"}, "productionSpec": spec})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer private-test-key" {
@@ -38,6 +39,9 @@ func TestOpenAICompatiblePlannerUsesOneRuntimeAndBearerSecret(t *testing.T) {
 		var request struct {
 			MaxTokens          int             `json:"max_tokens"`
 			ChatTemplateKwargs map[string]bool `json:"chat_template_kwargs"`
+			Messages           []struct {
+				Content string `json:"content"`
+			} `json:"messages"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
@@ -45,10 +49,13 @@ func TestOpenAICompatiblePlannerUsesOneRuntimeAndBearerSecret(t *testing.T) {
 		if request.MaxTokens != 2048 || request.ChatTemplateKwargs["enable_thinking"] {
 			t.Fatalf("unexpected bounded planner settings: %#v", request)
 		}
+		if len(request.Messages) != 2 || !strings.Contains(request.Messages[1].Content, "Simplified Chinese (locale zh)") {
+			t.Fatalf("locale prompt missing: %#v", request.Messages)
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": string(content)}}}, "usage": map[string]int{"total_tokens": 123}})
 	}))
 	defer server.Close()
-	result, err := (OpenAICompatiblePlanner{Endpoint: server.URL + "/v1", Model: "qwen", APIKey: "private-test-key", Client: server.Client()}).Plan(context.Background(), PlanRequest{Product: product, Shots: guides})
+	result, err := (OpenAICompatiblePlanner{Endpoint: server.URL + "/v1", Model: "qwen", APIKey: "private-test-key", Client: server.Client()}).Plan(context.Background(), PlanRequest{Product: product, Shots: guides, Locale: LocaleChinese})
 	if err != nil || result.Provider != "local-qwen-role-planner" || result.Units != 123 || len(result.Roles) != 5 {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}

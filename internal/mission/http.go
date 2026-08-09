@@ -125,6 +125,7 @@ type createRequest struct {
 	Product              Product `json:"product"`
 	ConsentAccepted      bool    `json:"consentAccepted"`
 	PrivacyNoticeVersion string  `json:"privacyNoticeVersion"`
+	Locale               Locale  `json:"locale"`
 }
 
 func (h *HTTPHandler) create(c *fiber.Ctx) error {
@@ -136,7 +137,7 @@ func (h *HTTPHandler) create(c *fiber.Ctx) error {
 	if !request.ConsentAccepted {
 		return apiError(c, fiber.StatusBadRequest, "consent_required", "privacy notice consent is required")
 	}
-	result, err := h.service.CreateWithConsent(c.UserContext(), userID, request.Product, request.PrivacyNoticeVersion)
+	result, err := h.service.CreateWithConsentAndLocale(c.UserContext(), userID, request.Product, request.PrivacyNoticeVersion, request.Locale)
 	if err != nil {
 		return mapServiceError(c, err)
 	}

@@ -8,6 +8,23 @@ import (
 	"time"
 )
 
+func TestCreateMissionLocaleDefaultsValidatesAndPersists(t *testing.T) {
+	repo := NewMemoryRepository()
+	service := NewService(repo, MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "localized" })
+	thai, err := service.CreateWithConsentAndLocale(context.Background(), "u", Product{Name: "สินค้า", Description: "ข้อมูลจริง"}, "v1", "")
+	if err != nil || thai.Locale != LocaleThai || thai.Shots[0].Instruction != "ถ่ายภาพหรือคลิปก่อนใช้สินค้า" {
+		t.Fatalf("default locale mission=%#v err=%v", thai, err)
+	}
+	service = NewService(NewMemoryRepository(), MemoryObjectStore{}, FallbackCaptioner{}, &MemoryLedger{}, time.Now, func() string { return "english" })
+	english, err := service.CreateWithConsentAndLocale(context.Background(), "u", Product{Name: "Box", Description: "Stores small items"}, "v1", LocaleEnglish)
+	if err != nil || english.Locale != LocaleEnglish || english.Shots[0].Instruction != "Capture a photo or video before using the product" {
+		t.Fatalf("English locale mission=%#v err=%v", english, err)
+	}
+	if _, err := service.CreateWithConsentAndLocale(context.Background(), "u", Product{Name: "Box", Description: "Stores items"}, "v1", "fr"); err == nil {
+		t.Fatal("unsupported locale accepted")
+	}
+}
+
 func TestFirstMissionFlow(t *testing.T) {
 	now := time.Date(2026, 8, 6, 9, 0, 0, 0, time.UTC)
 	ledger := &MemoryLedger{}

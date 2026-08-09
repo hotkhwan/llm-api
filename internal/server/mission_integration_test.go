@@ -89,6 +89,42 @@ func TestMissionRequiresAuthenticatedIdentity(t *testing.T) {
 	}
 }
 
+func TestMissionCreateAcceptsLocaleAndDefaultsToThai(t *testing.T) {
+	sequence := 0
+	service := mission.NewService(mission.NewMemoryRepository(), mission.MemoryObjectStore{}, mission.FallbackCaptioner{}, &mission.MemoryLedger{}, time.Now, func() string {
+		sequence++
+		return fmt.Sprintf("locale-%d", sequence)
+	})
+	options := testOptions()
+	options.Mission = service
+	app := New(slog.Default(), buildinfo.Static{}, NewReadiness(), options)
+	response := missionRequest(t, app, "POST", "/v1/missions", "application/json", []byte(`{"locale":"zh","consentAccepted":true,"privacyNoticeVersion":"v1","product":{"name":"收纳盒","description":"收纳小物"}}`))
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("Chinese create status = %d", response.StatusCode)
+	}
+	var got mission.Mission
+	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Locale != mission.LocaleChinese || got.Shots[0].Instruction != "拍摄使用商品前的照片或视频" {
+		t.Fatalf("Chinese mission = %#v", got)
+	}
+	response = missionRequest(t, app, "POST", "/v1/missions", "application/json", []byte(`{"consentAccepted":true,"privacyNoticeVersion":"v1","product":{"name":"สินค้า","description":"ข้อมูล"}}`))
+	if response.StatusCode != http.StatusCreated {
+		t.Fatalf("default create status = %d", response.StatusCode)
+	}
+	if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Locale != mission.LocaleThai {
+		t.Fatalf("default locale = %q", got.Locale)
+	}
+	response = missionRequest(t, app, "POST", "/v1/missions", "application/json", []byte(`{"locale":"ja","consentAccepted":true,"privacyNoticeVersion":"v1","product":{"name":"x","description":"y"}}`))
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid locale status = %d", response.StatusCode)
+	}
+}
+
 func TestMissionDoesNotRevealAnotherUsersMission(t *testing.T) {
 	repo := mission.NewMemoryRepository()
 	service := mission.NewService(repo, mission.MemoryObjectStore{}, mission.FallbackCaptioner{}, &mission.MemoryLedger{}, time.Now, func() string { return "private-mission" })

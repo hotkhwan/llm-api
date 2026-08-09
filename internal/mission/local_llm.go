@@ -40,13 +40,18 @@ func (g OpenAICompatiblePlanner) Plan(ctx context.Context, request PlanRequest) 
 	if err != nil {
 		return PlanResult{}, err
 	}
-	skeleton := deterministicProductionSpec(request.Product, request.Shots)
+	locale, err := normalizeLocale(request.Locale)
+	if err != nil {
+		return PlanResult{}, err
+	}
+	skeleton := deterministicProductionSpecForLocale(request.Product, request.Shots, locale)
 	skeletonJSON, _ := json.Marshal(skeleton)
+	language := localized(locale, "Thai", "English", "Simplified Chinese")
 	prompt := fmt.Sprintf(`Act through these roles in one shared runtime: creativeDirector, storyDirector, brandGuard, productionPlanner, promptCompiler.
 Return one JSON object with keys caption, cta, hashtags, productionSpec. productionSpec must preserve schemaVersion %q, exactly 3 shots, 9:16, 6-25 seconds and all continuity bible fields.
 Verified product JSON: %s
 Safe deterministic skeleton to improve without changing facts: %s
-Thai output. Never invent price, promotion, product capability, sales result or income promise.`, ProductionSpecSchemaVersion, facts, skeletonJSON)
+Write all user-visible prose in %s (locale %s). Preserve product names and user-provided facts exactly as supplied; do not translate or alter them. Never invent price, promotion, product capability, sales result or income promise.`, ProductionSpecSchemaVersion, facts, skeletonJSON, language, locale)
 	payload := map[string]any{
 		"model":                g.Model,
 		"temperature":          0.6,
@@ -121,12 +126,17 @@ func (g OpenAICompatibleCaptioner) Generate(ctx context.Context, request Caption
 	if err != nil {
 		return CaptionResult{}, err
 	}
-	prompt := fmt.Sprintf("ข้อมูลสินค้าจริง JSON: %s\nเขียน JSON ภาษาไทยเท่านั้น รูปแบบ caption, cta, hashtags ใช้เฉพาะข้อมูลใน JSON ห้ามสร้างราคา โปรโมชั่น คุณสมบัติ ผลลัพธ์ หรือคำสัญญารายได้", productFacts)
+	locale, err := normalizeLocale(request.Locale)
+	if err != nil {
+		return CaptionResult{}, err
+	}
+	language := localized(locale, "Thai", "English", "Simplified Chinese")
+	prompt := fmt.Sprintf("Verified product JSON: %s\nWrite JSON in %s (locale %s) with caption, cta, hashtags. Preserve product names and user-provided facts exactly as supplied. Use only the JSON facts; never invent prices, promotions, features, results, or income promises.", productFacts, language, locale)
 	payload := map[string]any{
 		"model":           model,
 		"temperature":     0.2,
 		"response_format": map[string]string{"type": "json_object"},
-		"messages":        []map[string]string{{"role": "system", "content": "คุณคือผู้ช่วย KWANNI ที่เขียนข้อความตรงไปตรงมาและไม่รับประกันรายได้"}, {"role": "user", "content": prompt}},
+		"messages":        []map[string]string{{"role": "system", "content": "You are a truthful KWANNI assistant. Follow the requested output locale and never promise income."}, {"role": "user", "content": prompt}},
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

@@ -25,7 +25,7 @@ func (p CaptionBackedPlanner) Plan(ctx context.Context, request PlanRequest) (Pl
 	if captioner == nil {
 		captioner = FallbackCaptioner{}
 	}
-	caption, err := captioner.Generate(ctx, CaptionRequest{Product: request.Product, Shots: request.Shots})
+	caption, err := captioner.Generate(ctx, CaptionRequest{Product: request.Product, Shots: request.Shots, Locale: request.Locale})
 	if err != nil {
 		return PlanResult{}, err
 	}
@@ -35,7 +35,7 @@ func (p CaptionBackedPlanner) Plan(ctx context.Context, request PlanRequest) (Pl
 	}
 	return PlanResult{
 		Caption: caption.Caption, CTA: caption.CTA, Hashtags: caption.Hashtags,
-		ProductionSpec: deterministicProductionSpec(request.Product, request.Shots),
+		ProductionSpec: deterministicProductionSpecForLocale(request.Product, request.Shots, request.Locale),
 		Roles:          roles,
 		Provider:       caption.Provider, Units: caption.Units, CostMicros: caption.CostMicros,
 	}, nil
@@ -53,7 +53,7 @@ func (p FallbackPlanner) Plan(ctx context.Context, request PlanRequest) (PlanRes
 			// the creative production plan, but user-facing product claims are
 			// rebuilt only from operator-verified fields so plausible adjectives
 			// (for example "durable") cannot silently become product facts.
-			result.Caption, result.CTA, result.Hashtags = verifiedProductCopy(request.Product)
+			result.Caption, result.CTA, result.Hashtags = verifiedProductCopyForLocale(request.Product, request.Locale)
 			return result, nil
 		}
 	}
@@ -65,32 +65,49 @@ func (p FallbackPlanner) Plan(ctx context.Context, request PlanRequest) (PlanRes
 }
 
 func verifiedProductCopy(product Product) (string, string, []string) {
+	return verifiedProductCopyForLocale(product, LocaleThai)
+}
+
+func verifiedProductCopyForLocale(product Product, locale Locale) (string, string, []string) {
+	locale, _ = normalizeLocale(locale)
 	parts := []string{strings.TrimSpace(product.Name) + ": " + strings.TrimSpace(product.Description)}
 	if facts := cleanStrings(product.Facts); len(facts) > 0 {
-		parts = append(parts, "ข้อมูลที่ผู้ใช้ระบุ: "+strings.Join(facts, " · "))
+		parts = append(parts, localized(locale, "ข้อมูลที่ผู้ใช้ระบุ: ", "User-provided facts: ", "用户提供的事实：")+strings.Join(facts, " · "))
 	}
 	if price := strings.TrimSpace(product.Price); price != "" {
-		parts = append(parts, "ราคาที่ผู้ใช้ระบุ: "+price)
+		parts = append(parts, localized(locale, "ราคาที่ผู้ใช้ระบุ: ", "User-provided price: ", "用户提供的价格：")+price)
 	}
 	if promotion := strings.TrimSpace(product.Promotion); promotion != "" {
-		parts = append(parts, "โปรโมชั่นที่ผู้ใช้ระบุ: "+promotion)
+		parts = append(parts, localized(locale, "โปรโมชั่นที่ผู้ใช้ระบุ: ", "User-provided promotion: ", "用户提供的促销信息：")+promotion)
 	}
 	caption := strings.Join(parts, "\n")
 	if runes := []rune(caption); len(runes) > 500 {
 		caption = string(runes[:497]) + "..."
 	}
-	return caption, "ดูรายละเอียดสินค้าจากลิงก์ที่แนบไว้", []string{"#ลองแล้วบอกต่อ", "#Affiliate"}
+	switch locale {
+	case LocaleEnglish:
+		return caption, "See the attached link for product details", []string{"#TriedAndShared", "#Affiliate"}
+	case LocaleChinese:
+		return caption, "请通过附带链接查看商品详情", []string{"#真实体验", "#好物分享"}
+	default:
+		return caption, "ดูรายละเอียดสินค้าจากลิงก์ที่แนบไว้", []string{"#ลองแล้วบอกต่อ", "#Affiliate"}
+	}
 }
 
 func deterministicProductionSpec(product Product, guides []Shot) ProductionSpec {
+	return deterministicProductionSpecForLocale(product, guides, LocaleThai)
+}
+
+func deterministicProductionSpecForLocale(product Product, guides []Shot, locale Locale) ProductionSpec {
+	locale, _ = normalizeLocale(locale)
 	facts := make([]string, 0, len(product.Facts)+3)
 	facts = append(facts, strings.TrimSpace(product.Description))
 	facts = append(facts, cleanStrings(product.Facts)...)
 	if strings.TrimSpace(product.Price) != "" {
-		facts = append(facts, "ราคาที่ผู้ใช้ระบุ: "+strings.TrimSpace(product.Price))
+		facts = append(facts, localized(locale, "ราคาที่ผู้ใช้ระบุ: ", "User-provided price: ", "用户提供的价格：")+strings.TrimSpace(product.Price))
 	}
 	if strings.TrimSpace(product.Promotion) != "" {
-		facts = append(facts, "โปรโมชั่นที่ผู้ใช้ระบุ: "+strings.TrimSpace(product.Promotion))
+		facts = append(facts, localized(locale, "โปรโมชั่นที่ผู้ใช้ระบุ: ", "User-provided promotion: ", "用户提供的促销信息：")+strings.TrimSpace(product.Promotion))
 	}
 	shots := make([]ProductionShot, 0, len(guides))
 	for index, guide := range guides {
@@ -115,21 +132,75 @@ func deterministicProductionSpec(product Product, guides []Shot) ProductionSpec 
 		SchemaVersion: ProductionSpecSchemaVersion, ProjectType: "affiliateShort",
 		DurationSeconds: len(shots) * 3, Platform: "tiktok", AspectRatio: "9:16",
 		CreativeIntent: "truthfulProductDemo",
-		StoryBeats:     []string{"แสดงปัญหาหรือสภาพก่อนใช้", "สาธิตการใช้สินค้าจริง", "แสดงผลหลังใช้โดยไม่กล่าวอ้างเกินข้อมูล"},
+		StoryBeats: localizedList(locale,
+			[]string{"แสดงปัญหาหรือสภาพก่อนใช้", "สาธิตการใช้สินค้าจริง", "แสดงผลหลังใช้โดยไม่กล่าวอ้างเกินข้อมูล"},
+			[]string{"Show the situation before use", "Demonstrate the real product in use", "Show the result without exceeding verified facts"},
+			[]string{"展示使用前的情况", "演示真实商品的使用过程", "只依据已核实信息展示使用结果"}),
 		Continuity: ContinuityBible{
-			Product:   ProductBible{Name: strings.TrimSpace(product.Name), VerifiedFacts: facts, RequiredDetails: []string{"สี รูปทรง และฉลากต้องตรงกับภาพสินค้าจริง"}, ForbiddenChanges: []string{"ห้ามเปลี่ยนโลโก้", "ห้ามสร้างคุณสมบัติ ราคา โปรโมชั่น หรือผลลัพธ์ที่ผู้ใช้ไม่ได้ระบุ"}},
-			Character: CharacterBible{Description: "ผู้ใช้งานจริง", Constraints: []string{"รักษารูปลักษณ์เดิมตลอดทุกช็อต"}},
-			Wardrobe:  WardrobeBible{ID: "look01", Description: "ชุดเดียวกันตลอดคลิป"},
+			Product: ProductBible{Name: strings.TrimSpace(product.Name), VerifiedFacts: facts,
+				RequiredDetails:  localizedList(locale, []string{"สี รูปทรง และฉลากต้องตรงกับภาพสินค้าจริง"}, []string{"Color, shape, and label must match the real product reference"}, []string{"颜色、形状和标签必须与真实商品参考图一致"}),
+				ForbiddenChanges: localizedList(locale, []string{"ห้ามเปลี่ยนโลโก้", "ห้ามสร้างคุณสมบัติ ราคา โปรโมชั่น หรือผลลัพธ์ที่ผู้ใช้ไม่ได้ระบุ"}, []string{"Do not alter the logo", "Do not invent features, prices, promotions, or results"}, []string{"不得更改品牌标志", "不得虚构功能、价格、促销或效果"})},
+			Character: CharacterBible{Description: localized(locale, "ผู้ใช้งานจริง", "real product user", "真实商品使用者"), Constraints: localizedList(locale, []string{"รักษารูปลักษณ์เดิมตลอดทุกช็อต"}, []string{"Keep the same appearance across every shot"}, []string{"所有镜头中的人物外观保持一致"})},
+			Wardrobe:  WardrobeBible{ID: "look01", Description: localized(locale, "ชุดเดียวกันตลอดคลิป", "same outfit throughout the video", "整段视频保持同一套服装")},
 			Makeup:    MakeupBible{ID: "makeup01", Description: "natural"},
-			Location:  LocationBible{ID: "set01", Description: "สถานที่จริงของผู้ใช้"},
+			Location:  LocationBible{ID: "set01", Description: localized(locale, "สถานที่จริงของผู้ใช้", "the user's real location", "用户的真实场景")},
 			Lighting:  LightingBible{ID: "light01", Style: "softNatural", ColorTemperatureKelvin: 5200},
-			Camera:    CameraBible{Orientation: "vertical", AspectRatio: "9:16", Constraints: []string{"ไม่บิดรูปทรงสินค้า", "ให้ฉลากอ่านได้เมื่ออยู่ในเฟรม"}},
+			Camera: CameraBible{Orientation: "vertical", AspectRatio: "9:16", Constraints: localizedList(locale,
+				[]string{"ไม่บิดรูปทรงสินค้า", "ให้ฉลากอ่านได้เมื่ออยู่ในเฟรม"},
+				[]string{"Do not distort the product shape", "Keep the label readable when it is in frame"},
+				[]string{"不得扭曲商品形状", "标签入镜时必须清晰可读"})},
 		},
 		Shots: shots,
 		ProviderPrompts: map[string]string{
 			"veo":      "Render from productionSpec; preserve every continuity bible constraint and verified product fact.",
 			"seedance": "Render from productionSpec; preserve every continuity bible constraint and verified product fact.",
 		},
+	}
+}
+
+func normalizeLocale(locale Locale) (Locale, error) {
+	switch Locale(strings.ToLower(strings.TrimSpace(string(locale)))) {
+	case "", LocaleThai:
+		return LocaleThai, nil
+	case LocaleEnglish:
+		return LocaleEnglish, nil
+	case LocaleChinese:
+		return LocaleChinese, nil
+	default:
+		return "", fmt.Errorf("locale must be th, en, or zh")
+	}
+}
+
+func localized(locale Locale, thai, english, chinese string) string {
+	switch locale {
+	case LocaleEnglish:
+		return english
+	case LocaleChinese:
+		return chinese
+	default:
+		return thai
+	}
+}
+
+func localizedList(locale Locale, thai, english, chinese []string) []string {
+	switch locale {
+	case LocaleEnglish:
+		return english
+	case LocaleChinese:
+		return chinese
+	default:
+		return thai
+	}
+}
+
+func localizedCaptureShots(locale Locale) []Shot {
+	switch locale {
+	case LocaleEnglish:
+		return []Shot{{1, "Capture a photo or video before using the product"}, {2, "Capture the product while it is being used"}, {3, "Capture the result after using the product"}}
+	case LocaleChinese:
+		return []Shot{{1, "拍摄使用商品前的照片或视频"}, {2, "拍摄正在使用商品的过程"}, {3, "拍摄使用商品后的结果"}}
+	default:
+		return []Shot{{1, "ถ่ายภาพหรือคลิปก่อนใช้สินค้า"}, {2, "ถ่ายตอนกำลังใช้สินค้า"}, {3, "ถ่ายผลลัพธ์หลังใช้สินค้า"}}
 	}
 }
 

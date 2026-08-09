@@ -43,6 +43,10 @@ func (s *Service) Create(ctx context.Context, userID string, product Product) (M
 }
 
 func (s *Service) CreateWithConsent(ctx context.Context, userID string, product Product, privacyNoticeVersion string) (Mission, error) {
+	return s.CreateWithConsentAndLocale(ctx, userID, product, privacyNoticeVersion, LocaleThai)
+}
+
+func (s *Service) CreateWithConsentAndLocale(ctx context.Context, userID string, product Product, privacyNoticeVersion string, locale Locale) (Mission, error) {
 	if strings.TrimSpace(userID) == "" || strings.TrimSpace(product.Name) == "" || strings.TrimSpace(product.Description) == "" {
 		return Mission{}, fmt.Errorf("userId, product name, and description are required")
 	}
@@ -50,9 +54,13 @@ func (s *Service) CreateWithConsent(ctx context.Context, userID string, product 
 	if privacyNoticeVersion == "" {
 		return Mission{}, fmt.Errorf("privacy notice consent is required")
 	}
+	locale, err := normalizeLocale(locale)
+	if err != nil {
+		return Mission{}, err
+	}
 	now := s.now().UTC()
-	m := Mission{ID: s.id(), UserID: strings.TrimSpace(userID), Product: product, Consent: ConsentEvidence{PrivacyNoticeVersion: privacyNoticeVersion, AcceptedAt: now}, State: StateMissionAccepted, Version: 1, CreatedAt: now, UpdatedAt: now,
-		Shots: []Shot{{1, "ถ่ายภาพหรือคลิปก่อนใช้สินค้า"}, {2, "ถ่ายตอนกำลังใช้สินค้า"}, {3, "ถ่ายผลลัพธ์หลังใช้สินค้า"}}}
+	m := Mission{ID: s.id(), UserID: strings.TrimSpace(userID), Locale: locale, Product: product, Consent: ConsentEvidence{PrivacyNoticeVersion: privacyNoticeVersion, AcceptedAt: now}, State: StateMissionAccepted, Version: 1, CreatedAt: now, UpdatedAt: now,
+		Shots: localizedCaptureShots(locale)}
 	if err := s.repo.Create(ctx, m); err != nil {
 		return Mission{}, err
 	}
@@ -66,6 +74,10 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 	m, err := s.repo.Get(ctx, id)
 	if err != nil {
 		return Mission{}, err
+	}
+	// Missions written before locale support are Thai by definition.
+	if m.Locale == "" {
+		m.Locale = LocaleThai
 	}
 	if isPostExportState(m.State) && m.Export != nil {
 		if err := s.reconcileVisualQC(ctx, &m); err != nil {
@@ -253,13 +265,13 @@ func (s *Service) GenerateDraft(ctx context.Context, id string) (Mission, error)
 			return Mission{}, err
 		}
 	}
-	result, err := s.planner.Plan(ctx, PlanRequest{Product: m.Product, Shots: m.Shots})
+	result, err := s.planner.Plan(ctx, PlanRequest{Product: m.Product, Shots: m.Shots, Locale: m.Locale})
 	if err != nil {
 		return Mission{}, err
 	}
 	// Verified product facts are never model-authored. Preserve the planner's
 	// creative choices but overwrite its product bible from user evidence.
-	result.ProductionSpec.Continuity.Product = deterministicProductionSpec(m.Product, m.Shots).Continuity.Product
+	result.ProductionSpec.Continuity.Product = deterministicProductionSpecForLocale(m.Product, m.Shots, m.Locale).Continuity.Product
 	result.ProductionSpec.Continuity.Product.ReferenceKeys = make([]string, 0, len(m.ProductReferences))
 	for _, reference := range m.ProductReferences {
 		result.ProductionSpec.Continuity.Product.ReferenceKeys = append(result.ProductionSpec.Continuity.Product.ReferenceKeys, reference.StorageKey)

@@ -2,6 +2,14 @@ package mission
 
 import "time"
 
+type Locale string
+
+const (
+	LocaleThai    Locale = "th"
+	LocaleEnglish Locale = "en"
+	LocaleChinese Locale = "zh"
+)
+
 type State string
 
 const (
@@ -272,6 +280,7 @@ type VisualQCState struct {
 type Mission struct {
 	ID                string             `json:"id"`
 	UserID            string             `json:"userId"`
+	Locale            Locale             `json:"locale"`
 	Product           Product            `json:"product"`
 	Consent           ConsentEvidence    `json:"consent"`
 	State             State              `json:"state"`

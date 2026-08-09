@@ -17,10 +17,21 @@ func (g FallbackCaptioner) Generate(ctx context.Context, request CaptionRequest)
 		}
 	}
 	name := strings.TrimSpace(request.Product.Name)
+	locale, _ := normalizeLocale(request.Locale)
+	caption := fmt.Sprintf("ลอง %s แบบง่าย ๆ ตาม 3 ขั้นตอนในคลิป", name)
+	cta := "ดูรายละเอียดสินค้าจากลิงก์ที่แนบไว้"
+	hashtags := []string{"#ลองแล้วบอกต่อ", "#Affiliate"}
+	if locale == LocaleEnglish {
+		caption = fmt.Sprintf("Try %s in three simple steps shown in the video", name)
+		cta = "See the attached link for product details"
+		hashtags = []string{"#TriedAndShared", "#Affiliate"}
+	} else if locale == LocaleChinese {
+		caption = fmt.Sprintf("通过视频中的三个简单步骤体验%s", name)
+		cta = "请通过附带链接查看商品详情"
+		hashtags = []string{"#真实体验", "#好物分享"}
+	}
 	return CaptionResult{
-		Caption:  fmt.Sprintf("ลอง %s แบบง่าย ๆ ตาม 3 ขั้นตอนในคลิป", name),
-		CTA:      "ดูรายละเอียดสินค้าจากลิงก์ที่แนบไว้",
-		Hashtags: []string{"#ลองแล้วบอกต่อ", "#Affiliate"},
+		Caption: caption, CTA: cta, Hashtags: hashtags,
 		Provider: "deterministic-fallback",
 	}, nil
 }

@@ -54,11 +54,13 @@ type ObjectMetadata struct {
 type CaptionRequest struct {
 	Product Product
 	Shots   []Shot
+	Locale  Locale
 }
 
 type PlanRequest struct {
 	Product Product
 	Shots   []Shot
+	Locale  Locale
 }
 
 type PlanResult struct {

@@ -34,3 +34,23 @@ func TestFallbackPlannerGroundsPublishedCopyInVerifiedProductFields(t *testing.T
 		t.Fatalf("copy = %#v", result)
 	}
 }
+
+func TestFallbackPlannerGroundsCopyInRequestedLocale(t *testing.T) {
+	product := Product{Name: "收纳盒", Description: "用于收纳小物", Facts: []string{"白色"}, Price: "¥29"}
+	shots := localizedCaptureShots(LocaleChinese)
+	result, err := (FallbackPlanner{Primary: hallucinatingPlanner{}}).Plan(context.Background(), PlanRequest{Product: product, Shots: shots, Locale: LocaleChinese})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "收纳盒: 用于收纳小物\n用户提供的事实：白色\n用户提供的价格：¥29"
+	if result.Caption != want || result.CTA != "请通过附带链接查看商品详情" {
+		t.Fatalf("localized grounded copy = %#v", result)
+	}
+	if len(result.Hashtags) != 2 || result.Hashtags[0] != "#真实体验" {
+		t.Fatalf("hashtags = %#v", result.Hashtags)
+	}
+	fallback, err := (CaptionBackedPlanner{Captions: FallbackCaptioner{}}).Plan(context.Background(), PlanRequest{Product: product, Shots: shots, Locale: LocaleChinese})
+	if err != nil || fallback.ProductionSpec.StoryBeats[0] != "展示使用前的情况" {
+		t.Fatalf("localized fallback spec=%#v err=%v", fallback.ProductionSpec.StoryBeats, err)
+	}
+}

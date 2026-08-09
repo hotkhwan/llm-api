@@ -206,6 +206,10 @@ components:
       type: object
       required: [product, consentAccepted, privacyNoticeVersion]
       properties:
+        locale:
+          type: string
+          enum: [th, en, zh]
+          default: th
         consentAccepted: { type: boolean, const: true }
         privacyNoticeVersion: { type: string, minLength: 1 }
         product:
@@ -219,10 +223,11 @@ components:
             facts: { type: array, items: { type: string } }
     Mission:
       type: object
-      required: [id, userId, product, state, shots, version, createdAt, updatedAt]
+      required: [id, userId, locale, product, state, shots, version, createdAt, updatedAt]
       properties:
         id: { type: string }
         userId: { type: string }
+        locale: { type: string, enum: [th, en, zh], default: th }
         product: { type: object }
         state:
           type: string
