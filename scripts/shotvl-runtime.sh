@@ -13,12 +13,32 @@ require() {
   command -v "$1" >/dev/null 2>&1 || { echo "required command missing: $1" >&2; exit 1; }
 }
 
+verify_auth_secret() {
+  require kubectl
+  require base64
+  local encoded decoded canonical
+  encoded="$(kubectl -n "$namespace" get secret kwanni-shotvl-auth -o jsonpath='{.data.SHOTVL_API_KEY}')"
+  decoded="$(printf '%s' "$encoded" | base64 -d)"
+  canonical="$(printf '%s' "$decoded" | base64 | tr -d '\n')"
+  case "$decoded" in
+    ''|*[!A-Za-z0-9._~-]*)
+      echo "SHOTVL_API_KEY must be one non-empty HTTP-header-safe value without whitespace" >&2
+      exit 1
+      ;;
+  esac
+  if [[ "$canonical" != "$encoded" ]]; then
+    echo "SHOTVL_API_KEY contains trailing whitespace or non-canonical bytes" >&2
+    exit 1
+  fi
+}
+
 install_runtime() {
   require kubectl
   kubectl -n "$namespace" get secret kwanni-shotvl-auth >/dev/null 2>&1 || {
     echo "missing Secret dev/kwanni-shotvl-auth; create key SHOTVL_API_KEY from a protected file" >&2
     exit 1
   }
+  verify_auth_secret
   kubectl apply -k "$manifest_dir"
   kubectl -n "$namespace" scale deployment "$deployment" --replicas=0
 }
@@ -44,6 +64,7 @@ wire_api() {
   require kubectl
   kubectl -n "$namespace" get deployment dev-llm-api >/dev/null
   kubectl -n "$namespace" get secret kwanni-shotvl-auth >/dev/null
+  verify_auth_secret
   kubectl -n "$namespace" set env deployment/dev-llm-api \
     SHOTVL_URL=http://kwanni-shotvl.dev.svc.cluster.local:8000/v1 \
     SHOTVL_MODEL=shotvl-7b \

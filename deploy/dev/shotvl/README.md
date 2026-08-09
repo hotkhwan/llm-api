@@ -32,11 +32,15 @@ literals:
 
 ```bash
 umask 077
-openssl rand -base64 48 > /secure/path/shotvl-api-key
+printf '%s' "$(openssl rand -hex 32)" > /secure/path/shotvl-api-key
 kubectl -n dev create secret generic kwanni-shotvl-auth \
   --from-file=SHOTVL_API_KEY=/secure/path/shotvl-api-key \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+The file must contain one HTTP-header-safe value with no trailing newline. The
+runtime script rejects whitespace and non-canonical Secret bytes before it
+restarts either service.
 
 The `dev-llm-api` application Secret must expose the same protected file as
 `SHOTVL_API_KEY`. Its non-secret environment is:

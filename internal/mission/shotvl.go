@@ -43,7 +43,7 @@ func (v OpenAICompatibleVisualQC) Analyze(ctx context.Context, spec ProductionSp
 		return VisualQCReport{}, fmt.Errorf("ShotVL requires 1-12 evidence frames")
 	}
 	specJSON, _ := json.Marshal(spec)
-	content := []map[string]any{{"type": "text", "text": "Evaluate each shot against this canonical production spec. Return strict JSON keys score, passed, shots. Each shot has shotId, metrics (shotSize, composition, cameraAngle, depth, lighting, subjectPlacement, productPlacement; 0..1), defects (code, severity info|warning|critical, message, evidenceFrameIds). Cite only supplied frame IDs. Production spec: " + string(specJSON)}}
+	content := []map[string]any{{"type": "text", "text": "Evaluate each shot against this canonical production spec. Return concise strict JSON keys score, passed, shots. Each shot has shotId, metrics (shotSize, composition, cameraAngle, depth, lighting, subjectPlacement, productPlacement; 0..1), defects (at most 3, with code, severity info|warning|critical, a concise message, evidenceFrameIds). Cite only supplied frame IDs. Do not add prose outside JSON. Production spec: " + string(specJSON)}}
 	frameIDs := make(map[string]bool, len(frames))
 	for _, frame := range frames {
 		if len(frame.JPEG) == 0 || len(frame.JPEG) > maxVisualFrameBytes {
@@ -55,7 +55,7 @@ func (v OpenAICompatibleVisualQC) Analyze(ctx context.Context, spec ProductionSp
 		frameIDs[frame.Evidence.ID] = true
 		content = append(content, map[string]any{"type": "text", "text": "evidenceFrameId=" + frame.Evidence.ID}, map[string]any{"type": "image_url", "image_url": map[string]string{"url": "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(frame.JPEG)}})
 	}
-	payload := map[string]any{"model": v.Model, "temperature": 0.1, "response_format": map[string]string{"type": "json_object"}, "messages": []map[string]any{{"role": "system", "content": "You are ShotVL, an advisory cinematic visual critic. Do not infer sales, income, or unseen product facts."}, {"role": "user", "content": content}}}
+	payload := map[string]any{"model": v.Model, "temperature": 0.1, "max_tokens": 1024, "response_format": map[string]string{"type": "json_object"}, "messages": []map[string]any{{"role": "system", "content": "You are ShotVL, an advisory cinematic visual critic. Do not infer sales, income, or unseen product facts."}, {"role": "user", "content": content}}}
 	body, _ := json.Marshal(payload)
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
