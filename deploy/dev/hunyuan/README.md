@@ -19,6 +19,13 @@ Hugging Face terms and pass a root-owned token file to `prefetch`; no token is
 stored in Git or Kubernetes. This gate means the runtime must not be advertised
 as available until the full prefetch and one DGX benchmark pass.
 
+The Tencent Hunyuan Community License excludes the EU, United Kingdom and
+South Korea from its licensed territory and requires end-user provider and
+non-affiliation disclosures. KWANNI's initial Thailand/China test audience is
+inside the stated territory, but an unauthenticated global endpoint is not.
+External enablement therefore also requires region enforcement and reviewed
+Terms/Acceptable Use notices; the operator-only flag is not a legal substitute.
+
 ```bash
 sudo scripts/hunyuan-runtime.sh prefetch /secure/path/hf-token
 sudo scripts/hunyuan-runtime.sh prepare
