@@ -68,6 +68,14 @@ Gemini Veo 3.1 long-running REST contract and sends the product as an immutable
 the same bytes as a `reference_image`. Provider output is copied into SeaweedFS
 before any QC step; temporary provider URLs are never exposed to the browser.
 
+KWANNI owns its provider runtime configuration; KSys and KDeploy are not
+dependencies for this contract. Create `dev/kwanni-video-providers` from
+protected files with `FIDELITY_VLM_API_KEY` and at least one of `VEO_API_KEY`
+or `SEEDANCE_API_KEY`, then run `scripts/video-provider-runtime.sh wire-api`
+with the non-secret model URL/model/revision variables from `.env.example`.
+The script validates Secret references without printing their values. ShotVL
+continues to use `scripts/shotvl-runtime.sh` and remains private/load-on-demand.
+
 ## Branch flow
 
 `feat/*` → `develop` → `main`
