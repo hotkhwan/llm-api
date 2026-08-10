@@ -82,7 +82,8 @@ class Handler(BaseHTTPRequestHandler):
                     "--inference_config", str(config_path), "--result_dir", str(result_dir),
                     "--unet_model_path", str(Path(MODEL_DIR) / "musetalkV15/unet.pth"),
                     "--unet_config", str(Path(MODEL_DIR) / "musetalkV15/musetalk.json"),
-                    "--version", "v15", "--ffmpeg_path", "/usr/bin",
+                    "--whisper_dir", str(Path(MODEL_DIR) / "whisper"),
+                    "--version", "v15", "--use_float16", "--ffmpeg_path", "/usr/bin",
                 ]
                 subprocess.run(command, check=True, timeout=TIMEOUT, cwd=SOURCE_ROOT)
                 output = result_dir / "v15/presenter.mp4"

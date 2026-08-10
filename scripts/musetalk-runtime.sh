@@ -31,12 +31,13 @@ case "$command" in
     fi
     git -C "$runtime_dir/MuseTalk" fetch --depth=1 origin "$source_revision"
     git -C "$runtime_dir/MuseTalk" checkout --detach "$source_revision"
+    ln -sfn /models "$runtime_dir/MuseTalk/models"
     install -m 0555 deploy/dev/musetalk/runtime/server.py "$runtime_dir/server.py"
     install -m 0444 deploy/dev/musetalk/runtime/requirements.txt "$runtime_dir/requirements.txt"
     podman run --rm --network host -v "$runtime_dir:/runtime" "$runtime_image" bash -lc \
       'python3 -m venv --system-site-packages /runtime/venv && /runtime/venv/bin/pip install --no-cache-dir -r /runtime/requirements.txt && /runtime/venv/bin/pip install --no-cache-dir mmengine==0.10.7 mmdet==3.1.0 mmpose==1.1.0'
     podman run --rm -v "$runtime_dir:/runtime:ro" "$runtime_image" \
-      /runtime/venv/bin/python -c "import torch, cv2, librosa, diffusers; assert torch.version.cuda; print('MuseTalk dependencies: PASS')"
+      bash -lc "command -v ffmpeg >/dev/null && /runtime/venv/bin/python -c 'import torch, cv2, librosa, diffusers; assert torch.version.cuda; print(\"MuseTalk dependencies: PASS\")'"
     ;;
   install)
     kubectl apply -k deploy/dev/musetalk
