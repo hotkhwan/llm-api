@@ -67,6 +67,9 @@ Gemini Veo 3.1 long-running REST contract and sends the product as an immutable
 `referenceImages` asset. Seedance uses Ark content-generation tasks and sends
 the same bytes as a `reference_image`. Provider output is copied into SeaweedFS
 before any QC step; temporary provider URLs are never exposed to the browser.
+The controlled Alpha default is Veo 3.1 Fast because it retains reference-image
+support at lower cost; Lite is not accepted because it cannot use
+`referenceImages` for product fidelity.
 
 KWANNI owns its provider runtime configuration; KSys and KDeploy are not
 dependencies for this contract. Create `dev/kwanni-video-providers` from

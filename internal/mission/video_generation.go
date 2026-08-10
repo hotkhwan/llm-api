@@ -322,7 +322,7 @@ func (v GeminiVeoProvider) Generate(ctx context.Context, request ProviderVideoRe
 	}
 	model := strings.TrimSpace(v.Model)
 	if model == "" {
-		model = "veo-3.1-generate-preview"
+		model = "veo-3.1-fast-generate-preview"
 	}
 	if v.APIKey == "" {
 		return ProviderVideo{}, fmt.Errorf("Veo API key is required")

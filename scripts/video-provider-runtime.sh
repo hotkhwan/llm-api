@@ -37,7 +37,7 @@ validate_contract() {
   : "${FIDELITY_VLM_MODEL_REVISION:?set immutable FIDELITY_VLM_MODEL_REVISION}"
 
   if secret_has_key VEO_API_KEY; then
-    : "${VEO_MODEL:=veo-3.1-generate-preview}"
+    : "${VEO_MODEL:=veo-3.1-fast-generate-preview}"
   fi
   if secret_has_key SEEDANCE_API_KEY; then
     : "${SEEDANCE_MODEL:?set the immutable Ark Seedance endpoint/model ID}"

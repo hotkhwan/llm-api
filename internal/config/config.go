@@ -107,7 +107,7 @@ func Load(lookup LookupEnv) (Config, error) {
 		FidelityVLMAPIKey:          strings.TrimSpace(lookup("FIDELITY_VLM_API_KEY")),
 		FidelityVLMThreshold:       0.88,
 		VeoBaseURL:                 valueOrDefault(lookup("VEO_BASE_URL"), "https://generativelanguage.googleapis.com/v1beta"),
-		VeoModel:                   valueOrDefault(lookup("VEO_MODEL"), "veo-3.1-generate-preview"),
+		VeoModel:                   valueOrDefault(lookup("VEO_MODEL"), "veo-3.1-fast-generate-preview"),
 		VeoAPIKey:                  strings.TrimSpace(lookup("VEO_API_KEY")),
 		SeedanceBaseURL:            valueOrDefault(lookup("SEEDANCE_BASE_URL"), "https://ark.cn-beijing.volces.com/api/v3"),
 		SeedanceModel:              strings.TrimSpace(lookup("SEEDANCE_MODEL")),
