@@ -107,6 +107,9 @@ func run(logger *slog.Logger) error {
 	if cfg.SeedanceAPIKey != "" {
 		providers["seedance"] = mission.ArkSeedanceProvider{BaseURL: cfg.SeedanceBaseURL, Model: cfg.SeedanceModel, APIKey: cfg.SeedanceAPIKey, Client: providerClient}
 	}
+	if cfg.WanURL != "" && cfg.WanAPIKey != "" {
+		providers["wan"] = mission.WanLocalProvider{Endpoint: cfg.WanURL, APIKey: cfg.WanAPIKey, Client: &http.Client{Timeout: cfg.WanTimeout}}
+	}
 	if len(providers) > 0 && durableStore != nil && durableObjects != nil {
 		fidelity := mission.OpenAIProductFidelity{Endpoint: cfg.FidelityVLMURL, Model: cfg.FidelityVLMModel, ModelRevision: cfg.FidelityVLMModelRevision, APIKey: cfg.FidelityVLMAPIKey, Threshold: cfg.FidelityVLMThreshold, Client: &http.Client{Timeout: 5 * time.Minute}}
 		reviser := mission.OpenAIShotReviser{Endpoint: cfg.LocalLLMURL, Model: cfg.LocalLLMModel, APIKey: cfg.LocalLLMAPIKey, Client: &http.Client{Timeout: cfg.LocalLLMTimeout}}

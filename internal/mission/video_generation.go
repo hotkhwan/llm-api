@@ -95,6 +95,9 @@ func (q *CloudVideoPipeline) runOne(ctx context.Context) bool {
 }
 
 func (q *CloudVideoPipeline) process(ctx context.Context, jobID string, request VideoGenerationRequest, result *VideoGenerationResult) error {
+	if request.Provider == "wan" {
+		return q.processLocalPreview(ctx, jobID, request, result)
+	}
 	if q.Fidelity == nil || q.Cinematic == nil || q.Reviser == nil {
 		return fmt.Errorf("product fidelity, ShotVL and Qwen shot revision must all be configured")
 	}
@@ -137,6 +140,105 @@ func (q *CloudVideoPipeline) process(ctx context.Context, jobID string, request 
 	}
 	setAllShotState(result, GenerationSucceeded, q.Now().UTC())
 	return q.Jobs.UpdateVideoProgress(ctx, jobID, *result, q.Now().UTC())
+}
+
+// processLocalPreview renders one five-second portrait clip containing the
+// three production beats. It deliberately skips paid fidelity services and
+// leaves product/cinematic review to the asynchronous advisory QC flow.
+func (q *CloudVideoPipeline) processLocalPreview(ctx context.Context, jobID string, request VideoGenerationRequest, result *VideoGenerationResult) error {
+	provider := q.Providers[request.Provider]
+	if provider == nil || provider.Name() != "wan" {
+		return fmt.Errorf("Wan local preview runtime is unavailable")
+	}
+	reference, err := readObjectBounded(ctx, q.Reader, request.Reference.StorageKey, maxProviderReferenceBytes)
+	if err != nil {
+		return fmt.Errorf("read product reference: %w", err)
+	}
+	shot := GeneratedShot{ShotID: "local-preview", Revision: 1, State: GenerationRendering, UpdatedAt: q.Now().UTC()}
+	upsertGeneratedShot(result, shot)
+	_ = q.Jobs.UpdateVideoProgress(ctx, jobID, *result, q.Now().UTC())
+	video, err := provider.Generate(ctx, ProviderVideoRequest{
+		MissionID:     request.MissionID,
+		Shot:          ProductionShot{ShotID: "local-preview"},
+		Revision:      1,
+		Prompt:        wanPreviewPrompt(request.Draft.ProductionSpec),
+		Reference:     reference,
+		ReferenceType: request.Reference.ContentType,
+	})
+	if err != nil {
+		return fmt.Errorf("Wan local preview: %w", err)
+	}
+	defer video.Body.Close()
+	metadata, err := q.Objects.Put(ctx, request.OutputKey, "video/mp4", io.LimitReader(video.Body, maxProviderVideoBytes+1))
+	if err != nil || metadata.Bytes <= 0 || metadata.Bytes > maxProviderVideoBytes {
+		return fmt.Errorf("store Wan local preview: %w", err)
+	}
+	shot.ProviderTask = video.TaskID
+	shot.StorageKey = request.OutputKey
+	shot.ContentType = metadata.ContentType
+	shot.Bytes = metadata.Bytes
+	shot.SHA256 = metadata.SHA256
+	shot.State = GenerationSucceeded
+	shot.UpdatedAt = q.Now().UTC()
+	upsertGeneratedShot(result, shot)
+	return q.Jobs.UpdateVideoProgress(ctx, jobID, *result, q.Now().UTC())
+}
+
+func wanPreviewPrompt(spec ProductionSpec) string {
+	product, _ := json.Marshal(spec.Continuity.Product)
+	shots, _ := json.Marshal(spec.Shots)
+	return fmt.Sprintf("Create one 5-second portrait 9:16 local product preview from the attached reference image. Compress the following three story beats into one fast sequence with hard visual emphasis and no text overlays: %s. The product is an immutable hero asset: preserve exact colors, silhouette, proportions, component count and layout, material, logo, label and every visible character from the reference. Never redesign, replace, multiply, crop away, or morph the product. Product bible: %s.", shots, product)
+}
+
+// WanLocalProvider talks only to the private, project-owned Wan runtime. The
+// durable Mongo job allows clients to leave the page and resume later.
+type WanLocalProvider struct {
+	Endpoint string
+	APIKey   string
+	Client   *http.Client
+}
+
+func (v WanLocalProvider) Name() string { return "wan" }
+
+func (v WanLocalProvider) Generate(ctx context.Context, request ProviderVideoRequest) (ProviderVideo, error) {
+	payload := map[string]any{
+		"prompt":          request.Prompt,
+		"referenceImage":  "data:" + request.ReferenceType + ";base64," + base64.StdEncoding.EncodeToString(request.Reference),
+		"durationSeconds": 5,
+		"width":           704,
+		"height":          1280,
+		"frameCount":      121,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return ProviderVideo{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(v.Endpoint, "/")+"/generate", bytes.NewReader(body))
+	if err != nil {
+		return ProviderVideo{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if v.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+v.APIKey)
+	}
+	client := v.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(req)
+	if err != nil {
+		return ProviderVideo{}, err
+	}
+	if response.StatusCode != http.StatusOK {
+		defer response.Body.Close()
+		message, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
+		return ProviderVideo{}, fmt.Errorf("runtime returned %d: %s", response.StatusCode, strings.TrimSpace(string(message)))
+	}
+	if contentType := strings.TrimSpace(strings.Split(response.Header.Get("Content-Type"), ";")[0]); contentType != "video/mp4" {
+		response.Body.Close()
+		return ProviderVideo{}, fmt.Errorf("runtime returned unsupported content type %q", contentType)
+	}
+	return ProviderVideo{TaskID: response.Header.Get("X-Kwanni-Task-ID"), ContentType: "video/mp4", Body: response.Body}, nil
 }
 
 func (q *CloudVideoPipeline) generateVerifiedShot(ctx context.Context, jobID string, request VideoGenerationRequest, provider VideoProvider, reference []byte, shot ProductionShot, result *VideoGenerationResult, root string) (GeneratedShot, ObjectMetadata, error) {

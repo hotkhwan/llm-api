@@ -63,6 +63,9 @@ type Config struct {
 	SeedanceBaseURL            string
 	SeedanceModel              string
 	SeedanceAPIKey             string
+	WanURL                     string
+	WanAPIKey                  string
+	WanTimeout                 time.Duration
 }
 
 type LookupEnv func(string) string
@@ -112,6 +115,9 @@ func Load(lookup LookupEnv) (Config, error) {
 		SeedanceBaseURL:            valueOrDefault(lookup("SEEDANCE_BASE_URL"), "https://ark.cn-beijing.volces.com/api/v3"),
 		SeedanceModel:              strings.TrimSpace(lookup("SEEDANCE_MODEL")),
 		SeedanceAPIKey:             strings.TrimSpace(lookup("SEEDANCE_API_KEY")),
+		WanURL:                     strings.TrimSpace(lookup("WAN_URL")),
+		WanAPIKey:                  strings.TrimSpace(lookup("WAN_API_KEY")),
+		WanTimeout:                 30 * time.Minute,
 	}
 
 	if !isEnvironment(cfg.Environment) {
@@ -156,6 +162,21 @@ func Load(lookup LookupEnv) (Config, error) {
 		parsed, parseErr := url.Parse(cfg.LocalLLMURL)
 		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
 			return Config{}, fmt.Errorf("LOCAL_LLM_URL must be an absolute http(s) URL")
+		}
+	}
+	if raw := strings.TrimSpace(lookup("WAN_TIMEOUT")); raw != "" {
+		cfg.WanTimeout, err = time.ParseDuration(raw)
+		if err != nil || cfg.WanTimeout < time.Minute || cfg.WanTimeout > time.Hour {
+			return Config{}, fmt.Errorf("WAN_TIMEOUT must be between 1m and 1h")
+		}
+	}
+	if cfg.WanURL != "" {
+		parsed, parseErr := url.Parse(cfg.WanURL)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+			return Config{}, fmt.Errorf("WAN_URL must be an absolute credential-free http(s) URL")
+		}
+		if cfg.WanAPIKey == "" {
+			return Config{}, fmt.Errorf("WAN_API_KEY is required when Wan is enabled")
 		}
 	}
 	if raw := strings.TrimSpace(lookup("SHOTVL_THRESHOLD")); raw != "" {

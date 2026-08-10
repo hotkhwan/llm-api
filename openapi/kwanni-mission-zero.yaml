@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: KWANNI Mission Zero API
-  version: 0.5.0
+  version: 0.6.0
   description: Image-first Mission Zero API. It does not promise sales or income.
 servers:
   - url: /v1
@@ -109,8 +109,8 @@ paths:
     parameters: [ { $ref: '#/components/parameters/MissionId' } ]
     post:
       operationId: generateVideo
-      summary: Generate, verify, repair and assemble the First Post through Veo or Seedance
-      description: Sends the exact original product image for every shot. Product Fidelity VLM/OCR and ShotVL are mandatory gates; Qwen revises only a failed shot up to two revisions.
+      summary: Queue a local Wan preview or an explicitly enabled cloud final
+      description: Wan renders one free five-second local preview from the exact product image and leaves ShotVL as asynchronous advisory QC. Paid Veo/Seedance remain disabled unless operators configure their private credentials and gates.
       requestBody:
         required: true
         content:
@@ -119,10 +119,10 @@ paths:
               type: object
               required: [provider]
               properties:
-                provider: { type: string, enum: [veo, seedance] }
+                provider: { type: string, enum: [wan, veo, seedance] }
       responses:
         '202':
-          description: Durable cloud generation job queued or resumed
+          description: Durable generation job queued or resumed; clients may leave and return later.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Mission' }
@@ -439,9 +439,10 @@ components:
         manualOverride: { $ref: '#/components/schemas/VisualQCOverride' }
     VideoGeneration:
       type: object
-      required: [provider, state, shots, updatedAt]
+      required: [provider, mode, state, shots, queuedAt, estimatedReadyAt, estimateSeconds, updatedAt]
       properties:
-        provider: { type: string, enum: [veo, seedance] }
+        provider: { type: string, enum: [wan, veo, seedance] }
+        mode: { type: string, enum: [localPreview, cloudFinal] }
         state: { type: string, enum: [queued, rendering, verifying, revising, assembling, succeeded, failed] }
         job: { $ref: '#/components/schemas/ProcessingJob' }
         shots:
@@ -462,6 +463,9 @@ components:
               updatedAt: { type: string, format: date-time }
         outputKey: { type: string }
         warning: { type: string }
+        queuedAt: { type: string, format: date-time }
+        estimatedReadyAt: { type: string, format: date-time }
+        estimateSeconds: { type: integer, minimum: 60, maximum: 3600 }
         updatedAt: { type: string, format: date-time }
     ProductFidelityReport:
       type: object

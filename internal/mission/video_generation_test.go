@@ -123,6 +123,66 @@ func TestProviderShotPromptNeverDropsProductIdentity(t *testing.T) {
 	}
 }
 
+func TestWanLocalProviderSendsExactReferenceAndFiveSecondContract(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/generate" || r.Header.Get("Authorization") != "Bearer wan-secret" {
+			t.Errorf("unexpected private runtime request")
+		}
+		_ = json.NewDecoder(r.Body).Decode(&received)
+		w.Header().Set("X-Kwanni-Task-ID", "wan-1")
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write([]byte("local-preview"))
+	}))
+	defer server.Close()
+	provider := WanLocalProvider{Endpoint: server.URL, APIKey: "wan-secret", Client: server.Client()}
+	video, err := provider.Generate(context.Background(), ProviderVideoRequest{Prompt: "three fast beats", Reference: []byte("exact-image"), ReferenceType: "image/png"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer video.Body.Close()
+	encoded, _ := json.Marshal(received)
+	body := string(encoded)
+	if video.TaskID != "wan-1" || !strings.Contains(body, "data:image/png;base64,ZXhhY3QtaW1hZ2U=") || !strings.Contains(body, `"durationSeconds":5`) || !strings.Contains(body, `"frameCount":121`) {
+		t.Fatalf("invalid Wan contract: task=%q body=%s", video.TaskID, body)
+	}
+	if strings.Contains(body, "wan-secret") {
+		t.Fatal("Wan credential leaked into body")
+	}
+}
+
+func TestWanPreviewPromptPreservesImmutableProductAndThreeBeats(t *testing.T) {
+	spec := ProductionSpec{Continuity: ContinuityBible{Product: ProductBible{Name: "Clicker", VerifiedFacts: []string{"four colored grids"}}}, Shots: []ProductionShot{{ShotID: "shot01"}, {ShotID: "shot02"}, {ShotID: "shot03"}}}
+	prompt := wanPreviewPrompt(spec)
+	for _, required := range []string{"5-second portrait", "three story beats", "immutable hero asset", "component count and layout", "Clicker", "shot01", "shot03"} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("missing %q in %s", required, prompt)
+		}
+	}
+}
+
+func TestWanPipelineCreatesOnePreviewWithoutPaidFidelityDependencies(t *testing.T) {
+	now := time.Date(2026, 8, 10, 1, 30, 0, 0, time.UTC)
+	objects := readableMemoryObjectStore{objects: map[string][]byte{"product.png": []byte("exact-reference")}}
+	jobs := &progressOnlyVideoStore{}
+	q := CloudVideoPipeline{Jobs: jobs, Objects: objects, Reader: objects, Providers: map[string]VideoProvider{"wan": staticWanProvider{}}, Now: func() time.Time { return now }}
+	draft := Draft{ProductionSpec: ProductionSpec{Continuity: ContinuityBible{Product: ProductBible{Name: "clicker"}}, Shots: []ProductionShot{{ShotID: "shot01"}, {ShotID: "shot02"}, {ShotID: "shot03"}}}}
+	result := VideoGenerationResult{Provider: "wan", OutputKey: "missions/m1/exports/preview.mp4"}
+	if err := q.process(context.Background(), "job-wan", VideoGenerationRequest{MissionID: "m1", Provider: "wan", Reference: ProductReference{StorageKey: "product.png", ContentType: "image/png"}, Draft: draft, OutputKey: result.OutputKey}, &result); err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Shots) != 1 || result.Shots[0].ShotID != "local-preview" || result.Shots[0].State != GenerationSucceeded || string(objects.objects[result.OutputKey]) != "wan-mp4" {
+		t.Fatalf("unexpected local preview: %#v", result)
+	}
+}
+
+type staticWanProvider struct{}
+
+func (staticWanProvider) Name() string { return "wan" }
+func (staticWanProvider) Generate(context.Context, ProviderVideoRequest) (ProviderVideo, error) {
+	return ProviderVideo{TaskID: "wan-local-1", ContentType: "video/mp4", Body: io.NopCloser(strings.NewReader("wan-mp4"))}, nil
+}
+
 func TestCloudPipelineRepairsOnlyFailedShotAndAssembles(t *testing.T) {
 	now := time.Date(2026, 8, 10, 1, 0, 0, 0, time.UTC)
 	objects := readableMemoryObjectStore{objects: map[string][]byte{"product.png": []byte("exact-reference")}}
@@ -199,6 +259,26 @@ func TestServicePromotesVerifiedProviderOutputWithoutLegacyAssets(t *testing.T) 
 	}
 	if finished.State != StateExported || finished.Export == nil || finished.Export.StorageKey == "" {
 		t.Fatalf("not promoted: %#v", finished)
+	}
+}
+
+func TestServiceQueuesWanAsDurableLocalPreviewWithConservativeETA(t *testing.T) {
+	now := time.Date(2026, 8, 10, 2, 0, 0, 0, time.UTC)
+	repo := NewMemoryRepository()
+	store := readableMemoryObjectStore{objects: map[string][]byte{}}
+	service := NewServiceWithOptions(repo, store, CaptionBackedPlanner{Captions: FallbackCaptioner{}}, NewMemoryJobQueue(func() time.Time { return now }, func() string { return "export-job" }), nil, &MemoryLedger{}, func() time.Time { return now }, func() string { return "mission-wan" }, 8<<20)
+	created, _ := service.Create(context.Background(), "u1", Product{Name: "p", Description: "d"})
+	jpeg := append([]byte{0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 'J', 'F', 'I', 'F', 0x00}, make([]byte, 512)...)
+	_, _ = service.UploadProductReference(context.Background(), created.ID, 1, "image/jpeg", jpeg)
+	_, _ = service.GenerateDraft(context.Background(), created.ID)
+	job := ProcessingJob{ID: "wan-job", Kind: "providerVideo", State: JobQueued, IdempotencyKey: "provider-video:mission-wan:wan", UpdatedAt: now}
+	service.SetVideoGenerationQueue(completedVideoQueue{job: job, result: VideoGenerationResult{Provider: "wan"}})
+	queued, err := service.GenerateVideo(context.Background(), created.ID, "wan")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued.VideoGeneration == nil || queued.VideoGeneration.Mode != "localPreview" || queued.VideoGeneration.EstimateSeconds != 1800 || !queued.VideoGeneration.EstimatedReadyAt.Equal(now.Add(30*time.Minute)) {
+		t.Fatalf("unexpected local-preview receipt: %#v", queued.VideoGeneration)
 	}
 }
 

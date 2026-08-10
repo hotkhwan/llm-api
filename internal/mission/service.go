@@ -82,6 +82,21 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 	if m.Locale == "" {
 		m.Locale = LocaleThai
 	}
+	if m.VideoGeneration != nil {
+		if m.VideoGeneration.Mode == "" {
+			m.VideoGeneration.Mode = "cloudFinal"
+			if m.VideoGeneration.Provider == "wan" {
+				m.VideoGeneration.Mode = "localPreview"
+			}
+		}
+		if m.VideoGeneration.QueuedAt.IsZero() {
+			m.VideoGeneration.QueuedAt = m.VideoGeneration.UpdatedAt
+		}
+		if m.VideoGeneration.EstimateSeconds == 0 {
+			m.VideoGeneration.EstimateSeconds = 1800
+			m.VideoGeneration.EstimatedReadyAt = m.VideoGeneration.QueuedAt.Add(30 * time.Minute)
+		}
+	}
 	s.attachProductReferenceURLs(ctx, &m)
 	if m.State == StateVideoGenerating && m.VideoGeneration != nil && m.VideoGeneration.Job != nil {
 		if err := s.reconcileVideoGeneration(ctx, &m); err != nil {
@@ -125,11 +140,11 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 
 func (s *Service) GenerateVideo(ctx context.Context, id, provider string) (Mission, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
-	if provider != "veo" && provider != "seedance" {
-		return Mission{}, fmt.Errorf("provider must be veo or seedance")
+	if provider != "wan" && provider != "veo" && provider != "seedance" {
+		return Mission{}, fmt.Errorf("provider must be wan, veo or seedance")
 	}
 	if s.video == nil {
-		return Mission{}, fmt.Errorf("cloud video generation is not configured")
+		return Mission{}, fmt.Errorf("video generation runtime is not configured")
 	}
 	m, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -161,15 +176,31 @@ func (s *Service) GenerateVideo(ctx context.Context, id, provider string) (Missi
 	if job.State == JobRunning {
 		state = GenerationRendering
 	}
+	now := s.now().UTC()
+	estimate := 20 * time.Minute
+	mode := "cloudFinal"
+	if provider == "wan" {
+		estimate = 30 * time.Minute
+		mode = "localPreview"
+	}
+	retryingFailedGeneration := m.VideoGeneration != nil && m.VideoGeneration.State == GenerationFailed
 	if m.VideoGeneration == nil {
-		m.VideoGeneration = &VideoGeneration{Provider: provider, State: state, Shots: []GeneratedShot{}, UpdatedAt: s.now().UTC()}
+		m.VideoGeneration = &VideoGeneration{Provider: provider, Mode: mode, State: state, Shots: []GeneratedShot{}, QueuedAt: now, EstimatedReadyAt: now.Add(estimate), EstimateSeconds: int(estimate.Seconds()), UpdatedAt: now}
 	}
 	m.VideoGeneration.Provider = provider
+	m.VideoGeneration.Mode = mode
 	m.VideoGeneration.Job = &job
 	m.VideoGeneration.State = state
 	m.VideoGeneration.OutputKey = outputKey
 	m.VideoGeneration.Warning = ""
-	m.VideoGeneration.UpdatedAt = s.now().UTC()
+	if m.VideoGeneration.QueuedAt.IsZero() || retryingFailedGeneration {
+		m.VideoGeneration.QueuedAt = now
+	}
+	if m.VideoGeneration.EstimatedReadyAt.IsZero() || retryingFailedGeneration {
+		m.VideoGeneration.EstimatedReadyAt = now.Add(estimate)
+	}
+	m.VideoGeneration.EstimateSeconds = int(estimate.Seconds())
+	m.VideoGeneration.UpdatedAt = now
 	m.State = StateVideoGenerating
 	if err := s.save(ctx, &m); err != nil {
 		return Mission{}, err
@@ -209,9 +240,14 @@ func (s *Service) reconcileVideoGeneration(ctx context.Context, m *Mission) erro
 	case JobSucceeded:
 		m.VideoGeneration.State = GenerationSucceeded
 		m.VideoGeneration.Warning = ""
-		m.Export = &Export{StorageKey: m.VideoGeneration.OutputKey, Format: "video/mp4", Width: 1080, Height: 1920, JobID: job.ID, DownloadURL: s.downloadURL(ctx, m.VideoGeneration.OutputKey)}
+		width, height := 1080, 1920
+		if m.VideoGeneration.Provider == "wan" {
+			width, height = 704, 1280
+		}
+		m.Export = &Export{StorageKey: m.VideoGeneration.OutputKey, Format: "video/mp4", Width: width, Height: height, JobID: job.ID, DownloadURL: s.downloadURL(ctx, m.VideoGeneration.OutputKey)}
 		from := m.State
 		m.State = StateExported
+		s.enqueueVisualQC(ctx, m)
 		if err := s.save(ctx, m); err != nil {
 			return err
 		}
@@ -564,7 +600,13 @@ func (s *Service) enqueueVisualQC(ctx context.Context, m *Mission) {
 		return
 	}
 	revision := len(m.VisualQC.History) + 1
-	key := fmt.Sprintf("visual-qc:%s:%s:%d", m.ID, m.ExportJob.ID, revision)
+	sourceJobID := "manual"
+	if m.ExportJob != nil {
+		sourceJobID = m.ExportJob.ID
+	} else if m.VideoGeneration != nil && m.VideoGeneration.Job != nil {
+		sourceJobID = m.VideoGeneration.Job.ID
+	}
+	key := fmt.Sprintf("visual-qc:%s:%s:%d", m.ID, sourceJobID, revision)
 	job, err := s.visualQC.EnqueueVisualQC(ctx, VisualQCRequest{MissionID: m.ID, IdempotencyKey: key, VideoKey: m.Export.StorageKey, Spec: m.Draft.ProductionSpec, Revision: revision})
 	if err != nil {
 		m.VisualQC.Warning = "Visual QC could not be queued; review the exported video manually"

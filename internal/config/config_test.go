@@ -78,11 +78,26 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"SHOTVL_THRESHOLD": "1.1"},
 		{"SHOTVL_THRESHOLD": "fast"},
 		{"SHOTVL_URL": "not-a-url"},
+		{"WAN_URL": "not-a-url", "WAN_API_KEY": "test"},
+		{"WAN_URL": "http://wan.invalid"},
+		{"WAN_TIMEOUT": "30s"},
+		{"WAN_TIMEOUT": "61m"},
 	}
 	for _, values := range tests {
 		if _, err := Load(func(key string) string { return values[key] }); err == nil {
 			t.Fatalf("Load() accepted invalid values: %#v", values)
 		}
+	}
+}
+
+func TestLoadAcceptsPrivateWanRuntime(t *testing.T) {
+	values := map[string]string{"WAN_URL": "http://kwanni-wan.dev.svc.cluster.local:8090", "WAN_API_KEY": "test-only", "WAN_TIMEOUT": "30m"}
+	cfg, err := Load(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.WanTimeout != 30*time.Minute || cfg.WanURL == "" || cfg.WanAPIKey == "" {
+		t.Fatalf("unexpected Wan config: %#v", cfg)
 	}
 }
 

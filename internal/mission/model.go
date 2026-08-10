@@ -242,13 +242,17 @@ type GeneratedShot struct {
 }
 
 type VideoGeneration struct {
-	Provider  string          `json:"provider"`
-	State     GenerationState `json:"state"`
-	Job       *ProcessingJob  `json:"job,omitempty"`
-	Shots     []GeneratedShot `json:"shots"`
-	OutputKey string          `json:"outputKey,omitempty"`
-	Warning   string          `json:"warning,omitempty"`
-	UpdatedAt time.Time       `json:"updatedAt"`
+	Provider         string          `json:"provider"`
+	Mode             string          `json:"mode"`
+	State            GenerationState `json:"state"`
+	Job              *ProcessingJob  `json:"job,omitempty"`
+	Shots            []GeneratedShot `json:"shots"`
+	OutputKey        string          `json:"outputKey,omitempty"`
+	Warning          string          `json:"warning,omitempty"`
+	QueuedAt         time.Time       `json:"queuedAt"`
+	EstimatedReadyAt time.Time       `json:"estimatedReadyAt"`
+	EstimateSeconds  int             `json:"estimateSeconds"`
+	UpdatedAt        time.Time       `json:"updatedAt"`
 }
 
 type JobState string

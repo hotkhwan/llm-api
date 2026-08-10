@@ -1,6 +1,6 @@
 # KWANNI API
 
-Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.5.0`
+Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.6.0`
 implements the first durable end-to-end Mission Zero slice:
 
 `product facts → one exact reference image → Qwen CPS → Veo/Seedance → Product Fidelity VLM+OCR → ShotVL → targeted Qwen shot repair → FFmpeg → SeaweedFS → download → mark posted → outcome`
@@ -62,17 +62,24 @@ when explicitly enabled for a controlled development/Alpha environment.
 
 Configuration is restricted to the non-secret settings documented in `.env.example`. JSON request logs are written to stdout and include a validated or generated `X-Request-ID`.
 
-Provider credentials are Kubernetes Secret values only. Veo uses the current
+Mission Zero defaults to the private Wan2.2 TI2V-5B runtime documented under
+`deploy/dev/wan`: one exact product image produces one five-second portrait
+local preview, with a durable 30-minute initial ETA and asynchronous advisory
+ShotVL review. The browser can leave and resume from MongoDB; output is stored
+in SeaweedFS. Wan is not product-fidelity proof, so manual review remains
+required. The local runtime has no public route and no per-video API charge.
+
+Optional paid provider credentials are Kubernetes Secret values only. Veo uses the current
 Gemini Veo 3.1 long-running REST contract and sends the product as an immutable
 `referenceImages` asset. Seedance uses Ark content-generation tasks and sends
 the same bytes as a `reference_image`. Provider output is copied into SeaweedFS
 before any QC step; temporary provider URLs are never exposed to the browser.
-The controlled Alpha default is Veo 3.1 Fast because it retains reference-image
-support at lower cost; Lite is not accepted because it cannot use
-`referenceImages` for product fidelity.
+Paid cloud generation is not the controlled Alpha default and is never invoked
+automatically from a local-preview job.
 
 KWANNI owns its provider runtime configuration; KSys and KDeploy are not
-dependencies for this contract. Create `dev/kwanni-video-providers` from
+dependencies for this contract. Only when an operator explicitly enables a
+paid final, create `dev/kwanni-video-providers` from
 protected files with `FIDELITY_VLM_API_KEY` and at least one of `VEO_API_KEY`
 or `SEEDANCE_API_KEY`, then run `scripts/video-provider-runtime.sh wire-api`
 with the non-secret model URL/model/revision variables from `.env.example`.
