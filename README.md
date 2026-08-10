@@ -1,15 +1,19 @@
 # KWANNI API
 
-Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.4.2`
+Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.5.0`
 implements the first durable end-to-end Mission Zero slice:
 
-`manual product → product reference → mission → 3-shot capture → draft → export → mark posted → outcome → next action`
+`product facts → one exact reference image → Qwen CPS → Veo/Seedance → Product Fidelity VLM+OCR → ShotVL → targeted Qwen shot repair → FFmpeg → SeaweedFS → download → mark posted → outcome`
 
 MongoDB, SeaweedFS S3, a restart-safe leased FFmpeg worker, OIDC ownership,
 Qwen role planning and Canonical Production Spec v1 are included; see
 [Mission Zero backend](docs/mission-zero-phase1.md).
-Optional MZ-3 ShotVL visual QC is advisory, globally serialized through MongoDB,
-and fail-open with evidence, history, visible warnings and manual override.
+Manual-upload MZ-3 ShotVL review remains advisory. Cloud-generated First Post
+uses a stricter gate: the exact original image is attached to every provider
+request, a general VLM performs product comparison and OCR, ShotVL checks
+cinematography, and Qwen may revise only the failed shot (maximum two
+revisions). The final 1080x1920 MP4 is never assembled unless all three shots
+pass both gates.
 
 ## Local checks
 
@@ -43,6 +47,7 @@ Copy `.env.example` values into your process environment and run `go run ./cmd/a
 - `PUT /v1/missions/{id}/assets/{shot}`
 - `PUT /v1/missions/{id}/product-references/{index}`
 - `POST /v1/missions/{id}/draft`
+- `POST /v1/missions/{id}/generate-video`
 - `POST /v1/missions/{id}/export`
 - `POST /v1/missions/{id}/posted`
 - `PUT /v1/missions/{id}/outcome`
@@ -56,6 +61,12 @@ configured OIDC issuer/audience; the trusted identity header is allowed only
 when explicitly enabled for a controlled development/Alpha environment.
 
 Configuration is restricted to the non-secret settings documented in `.env.example`. JSON request logs are written to stdout and include a validated or generated `X-Request-ID`.
+
+Provider credentials are Kubernetes Secret values only. Veo uses the current
+Gemini Veo 3.1 long-running REST contract and sends the product as an immutable
+`referenceImages` asset. Seedance uses Ark content-generation tasks and sends
+the same bytes as a `reference_image`. Provider output is copied into SeaweedFS
+before any QC step; temporary provider URLs are never exposed to the browser.
 
 ## Branch flow
 

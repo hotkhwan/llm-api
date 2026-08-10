@@ -142,6 +142,64 @@ type VisualQCAnalyzer interface {
 	Analyze(context.Context, ProductionSpec, []VisualQCFrame, int) (VisualQCReport, error)
 }
 
+type VideoGenerationRequest struct {
+	MissionID      string
+	IdempotencyKey string
+	Provider       string
+	Reference      ProductReference
+	Draft          Draft
+	OutputKey      string
+}
+
+type VideoGenerationResult struct {
+	Provider  string
+	Shots     []GeneratedShot
+	OutputKey string
+}
+
+type VideoGenerationQueue interface {
+	EnqueueVideo(context.Context, VideoGenerationRequest) (ProcessingJob, error)
+	GetVideo(context.Context, string) (ProcessingJob, *VideoGenerationResult, error)
+}
+
+type VideoGenerationJobStore interface {
+	EnqueueVideoJob(context.Context, VideoGenerationRequest) (ProcessingJob, error)
+	ClaimNextVideo(context.Context, string, time.Time, time.Time) (ProcessingJob, VideoGenerationRequest, bool, error)
+	UpdateVideoProgress(context.Context, string, VideoGenerationResult, time.Time) error
+	CompleteVideo(context.Context, string, string, VideoGenerationResult, time.Time) (ProcessingJob, error)
+	FailVideo(context.Context, string, string, VideoGenerationResult, string, time.Time) error
+	GetVideoJob(context.Context, string) (ProcessingJob, *VideoGenerationResult, error)
+}
+
+type ProviderVideoRequest struct {
+	MissionID     string
+	Shot          ProductionShot
+	Revision      int
+	Prompt        string
+	Reference     []byte
+	ReferenceType string
+	ReferenceURL  string
+}
+
+type ProviderVideo struct {
+	TaskID      string
+	ContentType string
+	Body        io.ReadCloser
+}
+
+type VideoProvider interface {
+	Name() string
+	Generate(context.Context, ProviderVideoRequest) (ProviderVideo, error)
+}
+
+type ProductFidelityAnalyzer interface {
+	AnalyzeProductFidelity(context.Context, ProductReference, []byte, ProductionShot, []VisualQCFrame) (ProductFidelityReport, error)
+}
+
+type ShotRevisionPlanner interface {
+	ReviseShot(context.Context, ProductionSpec, ProductionShot, int, []VisualQCDefect) (string, error)
+}
+
 type AuditSink interface {
 	RecordAudit(context.Context, AuditEvent) error
 	RecordCost(context.Context, CostEntry) error

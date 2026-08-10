@@ -56,6 +56,10 @@ func run(logger *slog.Logger) error {
 	var exportWorker *mission.FFmpegExportQueue
 	var visualQueue mission.VisualQCQueue
 	var visualWorker *mission.ShotVLQueue
+	var cinematicAnalyzer mission.VisualQCAnalyzer
+	var durableStore *mission.MongoStore
+	var durableObjects *mission.SeaweedFSStore
+	var videoWorker *mission.CloudVideoPipeline
 	var mongoClient *mongo.Client
 	if cfg.MongoURI != "" {
 		mongoClient, err = mongo.Connect(context.Background(), options.Client().ApplyURI(cfg.MongoURI))
@@ -69,6 +73,7 @@ func run(logger *slog.Logger) error {
 			return fmt.Errorf("ping MongoDB: %w", err)
 		}
 		store := mission.NewMongoStore(mongoClient.Database(cfg.MongoDatabase), time.Now, id)
+		durableStore = store
 		if err := store.EnsureIndexes(probeCtx); err != nil {
 			return fmt.Errorf("prepare MongoDB: %w", err)
 		}
@@ -77,10 +82,12 @@ func run(logger *slog.Logger) error {
 			return fmt.Errorf("configure SeaweedFS: %w", createErr)
 		}
 		repo, ledger, objects = store, store, seaweed
+		durableObjects = seaweed
 		exportWorker = &mission.FFmpegExportQueue{Jobs: store, Objects: seaweed, Reader: seaweed, Runner: mission.ExecCommandRunner{}, Now: time.Now, Timeout: 5 * time.Minute}
 		exportQueue = exportWorker
 		if cfg.ShotVLURL != "" {
 			analyzer := mission.OpenAICompatibleVisualQC{Endpoint: cfg.ShotVLURL, Model: cfg.ShotVLModel, ModelRevision: cfg.ShotVLModelRevision, APIKey: cfg.ShotVLAPIKey, Threshold: cfg.ShotVLThreshold, Client: &http.Client{Timeout: 3 * time.Minute}}
+			cinematicAnalyzer = analyzer
 			visualWorker = &mission.ShotVLQueue{Jobs: store, Objects: seaweed, Reader: seaweed, Runner: mission.ExecCommandRunner{}, Analyzer: analyzer, Now: time.Now, WorkerID: "visual-" + id(), Timeout: 5 * time.Minute}
 			visualQueue = visualWorker
 		}
@@ -92,6 +99,20 @@ func run(logger *slog.Logger) error {
 	}
 	planner := mission.FallbackPlanner{Primary: localPlanner, Fallback: mission.CaptionBackedPlanner{Captions: mission.FallbackCaptioner{}}}
 	missionService := mission.NewServiceWithOptions(repo, objects, planner, exportQueue, visualQueue, ledger, time.Now, id, int64(cfg.BodyLimit))
+	providers := map[string]mission.VideoProvider{}
+	providerClient := &http.Client{Timeout: 45 * time.Minute}
+	if cfg.VeoAPIKey != "" {
+		providers["veo"] = mission.GeminiVeoProvider{BaseURL: cfg.VeoBaseURL, Model: cfg.VeoModel, APIKey: cfg.VeoAPIKey, Client: providerClient}
+	}
+	if cfg.SeedanceAPIKey != "" {
+		providers["seedance"] = mission.ArkSeedanceProvider{BaseURL: cfg.SeedanceBaseURL, Model: cfg.SeedanceModel, APIKey: cfg.SeedanceAPIKey, Client: providerClient}
+	}
+	if len(providers) > 0 && durableStore != nil && durableObjects != nil {
+		fidelity := mission.OpenAIProductFidelity{Endpoint: cfg.FidelityVLMURL, Model: cfg.FidelityVLMModel, ModelRevision: cfg.FidelityVLMModelRevision, APIKey: cfg.FidelityVLMAPIKey, Threshold: cfg.FidelityVLMThreshold, Client: &http.Client{Timeout: 5 * time.Minute}}
+		reviser := mission.OpenAIShotReviser{Endpoint: cfg.LocalLLMURL, Model: cfg.LocalLLMModel, APIKey: cfg.LocalLLMAPIKey, Client: &http.Client{Timeout: cfg.LocalLLMTimeout}}
+		videoWorker = &mission.CloudVideoPipeline{Jobs: durableStore, Objects: durableObjects, Reader: durableObjects, Providers: providers, Fidelity: fidelity, Cinematic: cinematicAnalyzer, Reviser: reviser, Runner: mission.ExecCommandRunner{}, Now: time.Now, WorkerID: "video-" + id(), Timeout: 45 * time.Minute}
+		missionService.SetVideoGenerationQueue(videoWorker)
+	}
 	app := server.New(logger, buildinfo.Current(), readiness, server.Options{
 		ReadTimeout:                cfg.ReadTimeout,
 		WriteTimeout:               cfg.WriteTimeout,
@@ -110,6 +131,9 @@ func run(logger *slog.Logger) error {
 	}
 	if visualWorker != nil {
 		go visualWorker.Run(ctx)
+	}
+	if videoWorker != nil {
+		go videoWorker.Run(ctx)
 	}
 	logger.Info("service starting", "address", cfg.HTTPAddr, "environment", cfg.Environment)
 	if err := lifecycle.Run(ctx, lifecycle.Config{

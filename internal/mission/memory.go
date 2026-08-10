@@ -106,6 +106,29 @@ func cloneMission(value Mission) Mission {
 		}
 		value.VisualQC = &copy
 	}
+	if value.VideoGeneration != nil {
+		copy := *value.VideoGeneration
+		copy.Shots = append([]GeneratedShot(nil), copy.Shots...)
+		if copy.Job != nil {
+			job := *copy.Job
+			copy.Job = &job
+		}
+		for index := range copy.Shots {
+			copy.Shots[index].Defects = append([]VisualQCDefect(nil), copy.Shots[index].Defects...)
+			if copy.Shots[index].Fidelity != nil {
+				fidelity := *copy.Shots[index].Fidelity
+				fidelity.ReferenceText = append([]string(nil), fidelity.ReferenceText...)
+				fidelity.ObservedText = append([]string(nil), fidelity.ObservedText...)
+				fidelity.Defects = append([]VisualQCDefect(nil), fidelity.Defects...)
+				copy.Shots[index].Fidelity = &fidelity
+			}
+			if copy.Shots[index].Cinematic != nil {
+				cinematic := cloneVisualQCReport(*copy.Shots[index].Cinematic)
+				copy.Shots[index].Cinematic = &cinematic
+			}
+		}
+		value.VideoGeneration = &copy
+	}
 	return value
 }
 

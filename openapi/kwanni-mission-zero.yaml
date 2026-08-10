@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: KWANNI Mission Zero API
-  version: 0.4.2
+  version: 0.5.0
   description: Image-first Mission Zero API. It does not promise sales or income.
 servers:
   - url: /v1
@@ -101,6 +101,28 @@ paths:
       responses:
         '200':
           description: Export queued, running, failed, or completed with a verified MP4 and short-lived download URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/generate-video:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: generateVideo
+      summary: Generate, verify, repair and assemble the First Post through Veo or Seedance
+      description: Sends the exact original product image for every shot. Product Fidelity VLM/OCR and ShotVL are mandatory gates; Qwen revises only a failed shot up to two revisions.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider]
+              properties:
+                provider: { type: string, enum: [veo, seedance] }
+      responses:
+        '202':
+          description: Durable cloud generation job queued or resumed
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Mission' }
@@ -233,7 +255,7 @@ components:
         product: { type: object }
         state:
           type: string
-          enum: [missionAccepted, captureStarted, assetsUploaded, draftGenerating, draftReady, exportQueued, exported, posted, resultRecorded, nextMissionReady]
+          enum: [missionAccepted, captureStarted, assetsUploaded, draftGenerating, draftReady, videoGenerating, exportQueued, exported, posted, resultRecorded, nextMissionReady]
         shots: { type: array, items: { type: object } }
         assets: { type: array, items: { type: object } }
         productReferences: { type: array, items: { $ref: '#/components/schemas/ProductReference' } }
@@ -244,6 +266,7 @@ components:
         outcome: { $ref: '#/components/schemas/Outcome' }
         nextAction: { $ref: '#/components/schemas/NextAction' }
         visualQc: { $ref: '#/components/schemas/VisualQCState' }
+        videoGeneration: { $ref: '#/components/schemas/VideoGeneration' }
         version: { type: integer, format: int64 }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -371,7 +394,7 @@ components:
       required: [id, kind, state, attempt, idempotencyKey, updatedAt]
       properties:
         id: { type: string }
-        kind: { type: string, enum: [ffmpegExport, visualQc] }
+        kind: { type: string, enum: [ffmpegExport, visualQc, providerVideo] }
         state: { type: string, enum: [queued, running, succeeded, failed] }
         attempt: { type: integer, minimum: 0, maximum: 3 }
         idempotencyKey: { type: string }
@@ -414,6 +437,47 @@ components:
           items: { $ref: '#/components/schemas/VisualQCReport' }
         warning: { type: string }
         manualOverride: { $ref: '#/components/schemas/VisualQCOverride' }
+    VideoGeneration:
+      type: object
+      required: [provider, state, shots, updatedAt]
+      properties:
+        provider: { type: string, enum: [veo, seedance] }
+        state: { type: string, enum: [queued, rendering, verifying, revising, assembling, succeeded, failed] }
+        job: { $ref: '#/components/schemas/ProcessingJob' }
+        shots:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [shotId, revision, state, updatedAt]
+            properties:
+              shotId: { type: string }
+              revision: { type: integer, minimum: 1, maximum: 2 }
+              state: { type: string, enum: [queued, rendering, verifying, revising, assembling, succeeded, failed] }
+              storageKey: { type: string }
+              providerTask: { type: string }
+              fidelity: { $ref: '#/components/schemas/ProductFidelityReport' }
+              cinematic: { $ref: '#/components/schemas/VisualQCReport' }
+              defects: { type: array, items: { type: object } }
+              updatedAt: { type: string, format: date-time }
+        outputKey: { type: string }
+        warning: { type: string }
+        updatedAt: { type: string, format: date-time }
+    ProductFidelityReport:
+      type: object
+      required: [modelRevision, score, threshold, passed, metrics]
+      properties:
+        modelRevision: { type: string }
+        score: { type: number, minimum: 0, maximum: 1 }
+        threshold: { type: number, minimum: 0, maximum: 1 }
+        passed: { type: boolean }
+        metrics:
+          type: object
+          required: [color, silhouette, proportions, layout, material, logoText]
+          additionalProperties: { type: number, minimum: 0, maximum: 1 }
+        referenceText: { type: array, items: { type: string } }
+        observedText: { type: array, items: { type: string } }
+        defects: { type: array, items: { type: object } }
     VisualQCReport:
       type: object
       required: [revision, modelRevision, threshold, score, passed, evidenceFrames, shots, createdAt]

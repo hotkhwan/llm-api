@@ -23,6 +23,7 @@ type Service struct {
 	objects       ObjectStore
 	planner       ProductionPlanner
 	exports       ExportQueue
+	video         VideoGenerationQueue
 	visualQC      VisualQCQueue
 	ledger        AuditSink
 	now           func() time.Time
@@ -37,6 +38,8 @@ func NewService(repo Repository, objects ObjectStore, captions CaptionGenerator,
 func NewServiceWithOptions(repo Repository, objects ObjectStore, planner ProductionPlanner, exports ExportQueue, visualQC VisualQCQueue, ledger AuditSink, now func() time.Time, id IDGenerator, maxAssetBytes int64) *Service {
 	return &Service{repo: repo, objects: objects, planner: planner, exports: exports, visualQC: visualQC, ledger: ledger, now: now, id: id, maxAssetBytes: maxAssetBytes}
 }
+
+func (s *Service) SetVideoGenerationQueue(queue VideoGenerationQueue) { s.video = queue }
 
 func (s *Service) Create(ctx context.Context, userID string, product Product) (Mission, error) {
 	return s.CreateWithConsent(ctx, userID, product, "test-fixture")
@@ -80,6 +83,11 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 		m.Locale = LocaleThai
 	}
 	s.attachProductReferenceURLs(ctx, &m)
+	if m.State == StateVideoGenerating && m.VideoGeneration != nil && m.VideoGeneration.Job != nil {
+		if err := s.reconcileVideoGeneration(ctx, &m); err != nil {
+			m.VideoGeneration.Warning = "video generation status is temporarily unavailable"
+		}
+	}
 	if isPostExportState(m.State) && m.Export != nil {
 		if err := s.reconcileVisualQC(ctx, &m); err != nil {
 			m.VisualQC = visualQCWarning(m.VisualQC, "Visual QC unavailable; review the exported video manually")
@@ -113,6 +121,107 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 		}
 	}
 	return m, nil
+}
+
+func (s *Service) GenerateVideo(ctx context.Context, id, provider string) (Mission, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider != "veo" && provider != "seedance" {
+		return Mission{}, fmt.Errorf("provider must be veo or seedance")
+	}
+	if s.video == nil {
+		return Mission{}, fmt.Errorf("cloud video generation is not configured")
+	}
+	m, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return Mission{}, err
+	}
+	if m.State == StateExported || m.State == StatePosted || m.State == StateResultRecorded || m.State == StateNextMissionReady {
+		if m.Export != nil {
+			m.Export.DownloadURL = s.downloadURL(ctx, m.Export.StorageKey)
+		}
+		return m, nil
+	}
+	if m.State == StateVideoGenerating && m.VideoGeneration != nil && m.VideoGeneration.Provider != provider {
+		return Mission{}, fmt.Errorf("a different video provider is already processing this mission")
+	}
+	if m.State != StateDraftReady && m.State != StateVideoGenerating {
+		return Mission{}, ErrInvalidState
+	}
+	if m.Draft == nil || len(m.ProductReferences) != 1 {
+		return Mission{}, fmt.Errorf("draft and exactly one product reference are required")
+	}
+	from := m.State
+	outputKey := path.Join("missions", m.ID, "exports", "first-post-"+provider+".mp4")
+	idempotencyKey := "provider-video:" + m.ID + ":" + provider
+	job, err := s.video.EnqueueVideo(ctx, VideoGenerationRequest{MissionID: m.ID, IdempotencyKey: idempotencyKey, Provider: provider, Reference: m.ProductReferences[0], Draft: *m.Draft, OutputKey: outputKey})
+	if err != nil {
+		return Mission{}, err
+	}
+	state := GenerationQueued
+	if job.State == JobRunning {
+		state = GenerationRendering
+	}
+	if m.VideoGeneration == nil {
+		m.VideoGeneration = &VideoGeneration{Provider: provider, State: state, Shots: []GeneratedShot{}, UpdatedAt: s.now().UTC()}
+	}
+	m.VideoGeneration.Provider = provider
+	m.VideoGeneration.Job = &job
+	m.VideoGeneration.State = state
+	m.VideoGeneration.OutputKey = outputKey
+	m.VideoGeneration.Warning = ""
+	m.VideoGeneration.UpdatedAt = s.now().UTC()
+	m.State = StateVideoGenerating
+	if err := s.save(ctx, &m); err != nil {
+		return Mission{}, err
+	}
+	if from != StateVideoGenerating {
+		_ = s.audit(ctx, m.ID, "video.generation.queued", from, m.State)
+	}
+	return m, nil
+}
+
+func (s *Service) reconcileVideoGeneration(ctx context.Context, m *Mission) error {
+	job, result, err := s.video.GetVideo(ctx, m.VideoGeneration.Job.ID)
+	if err != nil {
+		return err
+	}
+	changed := job.State != m.VideoGeneration.Job.State
+	m.VideoGeneration.Job = &job
+	m.VideoGeneration.UpdatedAt = job.UpdatedAt
+	if result != nil {
+		m.VideoGeneration.Shots = append([]GeneratedShot(nil), result.Shots...)
+		m.VideoGeneration.OutputKey = result.OutputKey
+		if len(result.Shots) > 0 {
+			m.VideoGeneration.State = result.Shots[len(result.Shots)-1].State
+		}
+		changed = true
+	}
+	switch job.State {
+	case JobQueued:
+		m.VideoGeneration.State = GenerationQueued
+	case JobRunning:
+		if len(m.VideoGeneration.Shots) == 0 {
+			m.VideoGeneration.State = GenerationRendering
+		}
+	case JobFailed:
+		m.VideoGeneration.State = GenerationFailed
+		m.VideoGeneration.Warning = job.LastError
+	case JobSucceeded:
+		m.VideoGeneration.State = GenerationSucceeded
+		m.VideoGeneration.Warning = ""
+		m.Export = &Export{StorageKey: m.VideoGeneration.OutputKey, Format: "video/mp4", Width: 1080, Height: 1920, JobID: job.ID, DownloadURL: s.downloadURL(ctx, m.VideoGeneration.OutputKey)}
+		from := m.State
+		m.State = StateExported
+		if err := s.save(ctx, m); err != nil {
+			return err
+		}
+		_ = s.audit(ctx, m.ID, "video.generation.completed", from, m.State)
+		return nil
+	}
+	if changed {
+		return s.save(ctx, m)
+	}
+	return nil
 }
 
 func isPostExportState(state State) bool {

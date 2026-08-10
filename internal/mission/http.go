@@ -33,11 +33,28 @@ func (h *HTTPHandler) Register(router fiber.Router) {
 	router.Put("/missions/:id/assets/:shot", h.upload)
 	router.Put("/missions/:id/product-references/:index", h.uploadProductReference)
 	router.Post("/missions/:id/draft", h.draft)
+	router.Post("/missions/:id/generate-video", h.generateVideo)
 	router.Post("/missions/:id/export", h.export)
 	router.Post("/missions/:id/posted", h.posted)
 	router.Put("/missions/:id/outcome", h.outcome)
 	router.Post("/missions/:id/visual-qc", h.visualQC)
 	router.Put("/missions/:id/visual-qc/override", h.visualQCOverride)
+}
+
+type generateVideoRequest struct {
+	Provider string `json:"provider"`
+}
+
+func (h *HTTPHandler) generateVideo(c *fiber.Ctx) error {
+	var request generateVideoRequest
+	if err := c.BodyParser(&request); err != nil {
+		return apiError(c, fiber.StatusBadRequest, "invalid_json", "request must be valid JSON")
+	}
+	result, err := h.service.GenerateVideo(c.UserContext(), c.Params("id"), request.Provider)
+	if err != nil {
+		return mapServiceError(c, err)
+	}
+	return c.Status(fiber.StatusAccepted).JSON(result)
 }
 
 func (h *HTTPHandler) visualQC(c *fiber.Ctx) error {

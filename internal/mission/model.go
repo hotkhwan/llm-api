@@ -18,6 +18,7 @@ const (
 	StateAssetsUploaded   State = "assetsUploaded"
 	StateDraftGenerating  State = "draftGenerating"
 	StateDraftReady       State = "draftReady"
+	StateVideoGenerating  State = "videoGenerating"
 	StateExportQueued     State = "exportQueued"
 	StateExported         State = "exported"
 	StatePosted           State = "posted"
@@ -200,6 +201,56 @@ type Export struct {
 	DownloadURL string `json:"downloadUrl,omitempty"`
 }
 
+type GenerationState string
+
+const (
+	GenerationQueued     GenerationState = "queued"
+	GenerationRendering  GenerationState = "rendering"
+	GenerationVerifying  GenerationState = "verifying"
+	GenerationRevising   GenerationState = "revising"
+	GenerationAssembling GenerationState = "assembling"
+	GenerationSucceeded  GenerationState = "succeeded"
+	GenerationFailed     GenerationState = "failed"
+)
+
+// ProductFidelityReport is a release gate, not an advisory score. The VLM
+// performs visual comparison and OCR against the exact original reference.
+type ProductFidelityReport struct {
+	ModelRevision string             `json:"modelRevision"`
+	Score         float64            `json:"score"`
+	Threshold     float64            `json:"threshold"`
+	Passed        bool               `json:"passed"`
+	Metrics       map[string]float64 `json:"metrics"`
+	ReferenceText []string           `json:"referenceText,omitempty"`
+	ObservedText  []string           `json:"observedText,omitempty"`
+	Defects       []VisualQCDefect   `json:"defects,omitempty"`
+}
+
+type GeneratedShot struct {
+	ShotID       string                 `json:"shotId"`
+	Revision     int                    `json:"revision"`
+	State        GenerationState        `json:"state"`
+	StorageKey   string                 `json:"storageKey,omitempty"`
+	ContentType  string                 `json:"contentType,omitempty"`
+	Bytes        int64                  `json:"bytes,omitempty"`
+	SHA256       string                 `json:"sha256,omitempty"`
+	ProviderTask string                 `json:"providerTask,omitempty"`
+	Fidelity     *ProductFidelityReport `json:"fidelity,omitempty"`
+	Cinematic    *VisualQCReport        `json:"cinematic,omitempty"`
+	Defects      []VisualQCDefect       `json:"defects,omitempty"`
+	UpdatedAt    time.Time              `json:"updatedAt"`
+}
+
+type VideoGeneration struct {
+	Provider  string          `json:"provider"`
+	State     GenerationState `json:"state"`
+	Job       *ProcessingJob  `json:"job,omitempty"`
+	Shots     []GeneratedShot `json:"shots"`
+	OutputKey string          `json:"outputKey,omitempty"`
+	Warning   string          `json:"warning,omitempty"`
+	UpdatedAt time.Time       `json:"updatedAt"`
+}
+
 type JobState string
 
 const (
@@ -310,6 +361,7 @@ type Mission struct {
 	Outcome           *Outcome           `json:"outcome,omitempty"`
 	NextAction        *NextAction        `json:"nextAction,omitempty"`
 	VisualQC          *VisualQCState     `json:"visualQc,omitempty"`
+	VideoGeneration   *VideoGeneration   `json:"videoGeneration,omitempty"`
 	Version           int64              `json:"version"`
 	CreatedAt         time.Time          `json:"createdAt"`
 	UpdatedAt         time.Time          `json:"updatedAt"`

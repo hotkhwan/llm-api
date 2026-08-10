@@ -52,6 +52,17 @@ type Config struct {
 	ShotVLModelRevision        string
 	ShotVLAPIKey               string
 	ShotVLThreshold            float64
+	FidelityVLMURL             string
+	FidelityVLMModel           string
+	FidelityVLMModelRevision   string
+	FidelityVLMAPIKey          string
+	FidelityVLMThreshold       float64
+	VeoBaseURL                 string
+	VeoModel                   string
+	VeoAPIKey                  string
+	SeedanceBaseURL            string
+	SeedanceModel              string
+	SeedanceAPIKey             string
 }
 
 type LookupEnv func(string) string
@@ -90,6 +101,17 @@ func Load(lookup LookupEnv) (Config, error) {
 		ShotVLModelRevision:        valueOrDefault(lookup("SHOTVL_MODEL_REVISION"), "unversioned"),
 		ShotVLAPIKey:               strings.TrimSpace(lookup("SHOTVL_API_KEY")),
 		ShotVLThreshold:            0.75,
+		FidelityVLMURL:             strings.TrimSpace(lookup("FIDELITY_VLM_URL")),
+		FidelityVLMModel:           strings.TrimSpace(lookup("FIDELITY_VLM_MODEL")),
+		FidelityVLMModelRevision:   strings.TrimSpace(lookup("FIDELITY_VLM_MODEL_REVISION")),
+		FidelityVLMAPIKey:          strings.TrimSpace(lookup("FIDELITY_VLM_API_KEY")),
+		FidelityVLMThreshold:       0.88,
+		VeoBaseURL:                 valueOrDefault(lookup("VEO_BASE_URL"), "https://generativelanguage.googleapis.com/v1beta"),
+		VeoModel:                   valueOrDefault(lookup("VEO_MODEL"), "veo-3.1-generate-preview"),
+		VeoAPIKey:                  strings.TrimSpace(lookup("VEO_API_KEY")),
+		SeedanceBaseURL:            valueOrDefault(lookup("SEEDANCE_BASE_URL"), "https://ark.cn-beijing.volces.com/api/v3"),
+		SeedanceModel:              strings.TrimSpace(lookup("SEEDANCE_MODEL")),
+		SeedanceAPIKey:             strings.TrimSpace(lookup("SEEDANCE_API_KEY")),
 	}
 
 	if !isEnvironment(cfg.Environment) {
@@ -143,6 +165,13 @@ func Load(lookup LookupEnv) (Config, error) {
 		}
 		cfg.ShotVLThreshold = value
 	}
+	if raw := strings.TrimSpace(lookup("FIDELITY_VLM_THRESHOLD")); raw != "" {
+		value, parseErr := strconv.ParseFloat(raw, 64)
+		if parseErr != nil || value < 0 || value > 1 {
+			return Config{}, fmt.Errorf("FIDELITY_VLM_THRESHOLD must be between 0 and 1")
+		}
+		cfg.FidelityVLMThreshold = value
+	}
 	if cfg.ShotVLURL != "" {
 		parsed, parseErr := url.Parse(cfg.ShotVLURL)
 		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
@@ -150,6 +179,30 @@ func Load(lookup LookupEnv) (Config, error) {
 		}
 		if cfg.ShotVLModelRevision == "unversioned" {
 			return Config{}, fmt.Errorf("SHOTVL_MODEL_REVISION must be immutable when ShotVL is enabled")
+		}
+	}
+	if cfg.FidelityVLMURL != "" {
+		parsed, parseErr := url.Parse(cfg.FidelityVLMURL)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+			return Config{}, fmt.Errorf("FIDELITY_VLM_URL must be an absolute credential-free http(s) URL")
+		}
+		if cfg.FidelityVLMModel == "" || cfg.FidelityVLMModelRevision == "" {
+			return Config{}, fmt.Errorf("FIDELITY_VLM_MODEL and immutable FIDELITY_VLM_MODEL_REVISION are required")
+		}
+	}
+	if (cfg.VeoAPIKey != "" || cfg.SeedanceAPIKey != "") && (cfg.FidelityVLMURL == "" || cfg.ShotVLURL == "" || cfg.LocalLLMURL == "") {
+		return Config{}, fmt.Errorf("cloud video providers require Local Qwen, product fidelity VLM and ShotVL")
+	}
+	if cfg.SeedanceAPIKey != "" && cfg.SeedanceModel == "" {
+		return Config{}, fmt.Errorf("SEEDANCE_MODEL is required when Seedance is enabled")
+	}
+	for key, value := range map[string]string{"VEO_BASE_URL": cfg.VeoBaseURL, "SEEDANCE_BASE_URL": cfg.SeedanceBaseURL} {
+		parsed, parseErr := url.Parse(value)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+			return Config{}, fmt.Errorf("%s must be an absolute credential-free http(s) URL", key)
+		}
+		if cfg.Environment == "production" && parsed.Scheme != "https" {
+			return Config{}, fmt.Errorf("production %s must use https", key)
 		}
 	}
 	if cfg.BasePath != "" && (!strings.HasPrefix(cfg.BasePath, "/") || strings.Contains(cfg.BasePath, "..") || strings.ContainsAny(cfg.BasePath, "?#")) {

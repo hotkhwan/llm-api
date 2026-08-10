@@ -97,10 +97,12 @@ func (s *MongoStore) EnqueueExport(ctx context.Context, request ExportRequest) (
 
 type storedProcessingJob struct {
 	ProcessingJob `bson:",inline"`
-	Request       ExportRequest    `bson:"request"`
-	LeaseUntil    time.Time        `bson:"leaseuntil,omitempty"`
-	VisualRequest *VisualQCRequest `bson:"visualrequest,omitempty"`
-	VisualResult  *VisualQCReport  `bson:"visualresult,omitempty"`
+	Request       ExportRequest           `bson:"request"`
+	LeaseUntil    time.Time               `bson:"leaseuntil,omitempty"`
+	VisualRequest *VisualQCRequest        `bson:"visualrequest,omitempty"`
+	VisualResult  *VisualQCReport         `bson:"visualresult,omitempty"`
+	VideoRequest  *VideoGenerationRequest `bson:"videorequest,omitempty"`
+	VideoResult   *VideoGenerationResult  `bson:"videoresult,omitempty"`
 }
 
 func (s *MongoStore) ClaimNextExport(ctx context.Context, now, leaseUntil time.Time) (ProcessingJob, ExportRequest, bool, error) {
@@ -250,4 +252,84 @@ func (s *MongoStore) GetVisualQCJob(ctx context.Context, id string) (ProcessingJ
 		return ProcessingJob{}, nil, ErrNotFound
 	}
 	return stored.ProcessingJob, stored.VisualResult, err
+}
+
+func (s *MongoStore) EnqueueVideoJob(ctx context.Context, request VideoGenerationRequest) (ProcessingJob, error) {
+	job := ProcessingJob{ID: s.id(), Kind: "providerVideo", State: JobQueued, IdempotencyKey: request.IdempotencyKey, UpdatedAt: s.now().UTC()}
+	_, err := s.jobs.InsertOne(ctx, storedProcessingJob{ProcessingJob: job, VideoRequest: &request})
+	if mongo.IsDuplicateKeyError(err) {
+		var existing storedProcessingJob
+		if findErr := s.jobs.FindOne(ctx, bson.M{"idempotencykey": request.IdempotencyKey}).Decode(&existing); findErr != nil {
+			return ProcessingJob{}, findErr
+		}
+		if existing.State == JobFailed && existing.Attempt < 3 {
+			var retried storedProcessingJob
+			updateErr := s.jobs.FindOneAndUpdate(ctx, bson.M{"id": existing.ID, "state": JobFailed}, bson.M{"$set": bson.M{"state": JobQueued, "updatedat": s.now().UTC(), "lasterror": ""}}, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&retried)
+			if updateErr == nil {
+				return retried.ProcessingJob, nil
+			}
+		}
+		return existing.ProcessingJob, nil
+	}
+	return job, err
+}
+
+func (s *MongoStore) ClaimNextVideo(ctx context.Context, workerID string, now, leaseUntil time.Time) (ProcessingJob, VideoGenerationRequest, bool, error) {
+	lockFilter := bson.M{"_id": "shotvl-global", "$or": bson.A{bson.M{"leaseuntil": bson.M{"$lte": now}}, bson.M{"owner": workerID}}}
+	lockUpdate := bson.M{"$set": bson.M{"owner": workerID, "leaseuntil": leaseUntil}}
+	var lock bson.M
+	lockErr := s.visualLocks.FindOneAndUpdate(ctx, lockFilter, lockUpdate, options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)).Decode(&lock)
+	if mongo.IsDuplicateKeyError(lockErr) || errors.Is(lockErr, mongo.ErrNoDocuments) { return ProcessingJob{}, VideoGenerationRequest{}, false, nil }
+	if lockErr != nil { return ProcessingJob{}, VideoGenerationRequest{}, false, lockErr }
+	if _, err := s.jobs.UpdateMany(ctx, bson.M{"kind": "providerVideo", "state": JobRunning, "leaseuntil": bson.M{"$lte": now}, "attempt": bson.M{"$gte": 3}}, bson.M{"$set": bson.M{"state": JobFailed, "updatedat": now, "lasterror": "maximum provider video attempts exceeded"}}); err != nil {
+		_, _ = s.visualLocks.DeleteOne(ctx, bson.M{"_id": "shotvl-global", "owner": workerID})
+		return ProcessingJob{}, VideoGenerationRequest{}, false, err
+	}
+	filter := bson.M{"kind": "providerVideo", "attempt": bson.M{"$lt": 3}, "$or": bson.A{bson.M{"state": JobQueued}, bson.M{"state": JobRunning, "leaseuntil": bson.M{"$lte": now}}}}
+	update := bson.M{"$set": bson.M{"state": JobRunning, "leaseuntil": leaseUntil, "updatedat": now}, "$inc": bson.M{"attempt": 1}}
+	var stored storedProcessingJob
+	err := s.jobs.FindOneAndUpdate(ctx, filter, update, options.FindOneAndUpdate().SetSort(bson.D{{Key: "updatedat", Value: 1}}).SetReturnDocument(options.After)).Decode(&stored)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		_, _ = s.visualLocks.DeleteOne(ctx, bson.M{"_id": "shotvl-global", "owner": workerID})
+		return ProcessingJob{}, VideoGenerationRequest{}, false, nil
+	}
+	if err != nil {
+		_, _ = s.visualLocks.DeleteOne(ctx, bson.M{"_id": "shotvl-global", "owner": workerID})
+		return ProcessingJob{}, VideoGenerationRequest{}, false, err
+	}
+	if stored.VideoRequest == nil {
+		_, _ = s.visualLocks.DeleteOne(ctx, bson.M{"_id": "shotvl-global", "owner": workerID})
+		return ProcessingJob{}, VideoGenerationRequest{}, false, fmt.Errorf("provider video job has no request")
+	}
+	return stored.ProcessingJob, *stored.VideoRequest, true, nil
+}
+
+func (s *MongoStore) UpdateVideoProgress(ctx context.Context, id string, result VideoGenerationResult, at time.Time) error {
+	_, err := s.jobs.UpdateOne(ctx, bson.M{"id": id, "kind": "providerVideo", "state": JobRunning}, bson.M{"$set": bson.M{"videoresult": result, "updatedat": at}})
+	return err
+}
+
+func (s *MongoStore) CompleteVideo(ctx context.Context, id, workerID string, result VideoGenerationResult, at time.Time) (ProcessingJob, error) {
+	defer func(){ _,_ = s.visualLocks.DeleteOne(context.WithoutCancel(ctx), bson.M{"_id":"shotvl-global","owner":workerID}) }()
+	var stored storedProcessingJob
+	err := s.jobs.FindOneAndUpdate(ctx, bson.M{"id": id, "kind": "providerVideo", "state": JobRunning}, bson.M{"$set": bson.M{"state": JobSucceeded, "videoresult": result, "updatedat": at, "lasterror": ""}}, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&stored)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return ProcessingJob{}, ErrVersionConflict
+	}
+	return stored.ProcessingJob, err
+}
+
+func (s *MongoStore) FailVideo(ctx context.Context, id, workerID string, result VideoGenerationResult, message string, at time.Time) error {
+	defer func(){ _,_ = s.visualLocks.DeleteOne(context.WithoutCancel(ctx), bson.M{"_id":"shotvl-global","owner":workerID}) }()
+	_, err := s.jobs.UpdateOne(ctx, bson.M{"id": id, "kind": "providerVideo"}, bson.M{"$set": bson.M{"state": JobFailed, "videoresult": result, "updatedat": at, "lasterror": message}})
+	return err
+}
+
+func (s *MongoStore) GetVideoJob(ctx context.Context, id string) (ProcessingJob, *VideoGenerationResult, error) {
+	var stored storedProcessingJob
+	err := s.jobs.FindOne(ctx, bson.M{"id": id, "kind": "providerVideo"}).Decode(&stored)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return ProcessingJob{}, nil, ErrNotFound
+	}
+	return stored.ProcessingJob, stored.VideoResult, err
 }
