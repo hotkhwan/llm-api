@@ -20,7 +20,8 @@ case "$command" in
     install -d -m 0750 "$model_dir" "$model_dir/face-parse-bisent"
     podman run --rm --network host -v "$model_dir:/models" "$prefetch_image" \
       python3 -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='TMElyralab/MuseTalk', revision='$model_revision', local_dir='/models'); snapshot_download(repo_id='stabilityai/sd-vae-ft-mse', revision='$vae_revision', local_dir='/models/sd-vae', allow_patterns=['config.json','diffusion_pytorch_model.bin']); snapshot_download(repo_id='openai/whisper-tiny', revision='$whisper_revision', local_dir='/models/whisper', allow_patterns=['config.json','pytorch_model.bin','preprocessor_config.json']); snapshot_download(repo_id='yzd-v/DWPose', revision='$dwpose_revision', local_dir='/models/dwpose', allow_patterns=['dw-ll_ucoco_384.pth']); snapshot_download(repo_id='ByteDance/LatentSync', revision='$syncnet_revision', local_dir='/models/syncnet', allow_patterns=['latentsync_syncnet.pt'])"
-    curl -fL https://drive.google.com/uc?id=154JgKpzCPW82qINcVieuPH3fZ2e0P812 -o "$model_dir/face-parse-bisent/79999_iter.pth"
+    podman run --rm --network host -v "$model_dir:/models" "$prefetch_image" bash -lc \
+      'python3 -m pip install --quiet gdown==5.2.0 && gdown --id 154JgKpzCPW82qINcVieuPH3fZ2e0P812 -O /models/face-parse-bisent/79999_iter.pth'
     curl -fL https://download.pytorch.org/models/resnet18-5c106cde.pth -o "$model_dir/face-parse-bisent/resnet18-5c106cde.pth"
     ;;
   prepare)
