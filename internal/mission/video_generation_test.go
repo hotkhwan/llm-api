@@ -151,13 +151,56 @@ func TestWanLocalProviderSendsExactReferenceAndFiveSecondContract(t *testing.T) 
 	}
 }
 
-func TestWanPreviewPromptPreservesImmutableProductAndThreeBeats(t *testing.T) {
+func TestLocalProductPreviewPromptPreservesImmutableProductAndThreeBeats(t *testing.T) {
 	spec := ProductionSpec{Continuity: ContinuityBible{Product: ProductBible{Name: "Clicker", VerifiedFacts: []string{"four colored grids"}}}, Shots: []ProductionShot{{ShotID: "shot01"}, {ShotID: "shot02"}, {ShotID: "shot03"}}}
-	prompt := wanPreviewPrompt(spec)
+	prompt := localProductPreviewPrompt(spec, "hunyuan")
 	for _, required := range []string{"5-second portrait", "three story beats", "immutable hero asset", "component count and layout", "Clicker", "shot01", "shot03"} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("missing %q in %s", required, prompt)
 		}
+	}
+	if !strings.Contains(localProductPreviewPrompt(spec, "ltx"), "synchronized, subtle commercial sound") {
+		t.Fatal("LTX prompt must request native synchronized audio")
+	}
+}
+
+func TestLocalProductPreviewOutputDimensionsAreTruthful(t *testing.T) {
+	tests := map[string][2]int{
+		"hunyuan": {480, 848}, "ltx": {448, 768}, "wan": {704, 1280}, "veo": {1080, 1920},
+	}
+	for provider, expected := range tests {
+		width, height := videoOutputDimensions(provider)
+		if width != expected[0] || height != expected[1] {
+			t.Fatalf("%s dimensions=%dx%d, want %dx%d", provider, width, height, expected[0], expected[1])
+		}
+	}
+}
+
+func TestLocalProductPreviewProviderSendsExactReferenceWithoutCredentialLeak(t *testing.T) {
+	var received map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/generate" || r.Header.Get("Authorization") != "Bearer local-secret" {
+			t.Errorf("unexpected private runtime request")
+		}
+		_ = json.NewDecoder(r.Body).Decode(&received)
+		w.Header().Set("X-Kwanni-Task-ID", "hunyuan-1")
+		w.Header().Set("Content-Type", "video/mp4")
+		_, _ = w.Write([]byte("local-preview"))
+	}))
+	defer server.Close()
+	provider := LocalProductPreviewProvider{Provider: "hunyuan", Endpoint: server.URL, APIKey: "local-secret", Client: server.Client()}
+	video, err := provider.Generate(context.Background(), ProviderVideoRequest{Prompt: "three fast beats", Reference: []byte("exact-image"), ReferenceType: "image/webp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer video.Body.Close()
+	encoded, _ := json.Marshal(received)
+	body := string(encoded)
+	if video.TaskID != "hunyuan-1" || !strings.Contains(body, "data:image/webp;base64,ZXhhY3QtaW1hZ2U=") || !strings.Contains(body, `"durationSeconds":5`) {
+		t.Fatalf("invalid Hunyuan contract: task=%q body=%s", video.TaskID, body)
+	}
+	if strings.Contains(body, "local-secret") {
+		t.Fatal("runtime credential leaked into body")
 	}
 }
 

@@ -279,8 +279,12 @@ func (s *MongoStore) ClaimNextVideo(ctx context.Context, workerID string, now, l
 	lockUpdate := bson.M{"$set": bson.M{"owner": workerID, "leaseuntil": leaseUntil}}
 	var lock bson.M
 	lockErr := s.visualLocks.FindOneAndUpdate(ctx, lockFilter, lockUpdate, options.FindOneAndUpdate().SetUpsert(true).SetReturnDocument(options.After)).Decode(&lock)
-	if mongo.IsDuplicateKeyError(lockErr) || errors.Is(lockErr, mongo.ErrNoDocuments) { return ProcessingJob{}, VideoGenerationRequest{}, false, nil }
-	if lockErr != nil { return ProcessingJob{}, VideoGenerationRequest{}, false, lockErr }
+	if mongo.IsDuplicateKeyError(lockErr) || errors.Is(lockErr, mongo.ErrNoDocuments) {
+		return ProcessingJob{}, VideoGenerationRequest{}, false, nil
+	}
+	if lockErr != nil {
+		return ProcessingJob{}, VideoGenerationRequest{}, false, lockErr
+	}
 	if _, err := s.jobs.UpdateMany(ctx, bson.M{"kind": "providerVideo", "state": JobRunning, "leaseuntil": bson.M{"$lte": now}, "attempt": bson.M{"$gte": 3}}, bson.M{"$set": bson.M{"state": JobFailed, "updatedat": now, "lasterror": "maximum provider video attempts exceeded"}}); err != nil {
 		_, _ = s.visualLocks.DeleteOne(ctx, bson.M{"_id": "shotvl-global", "owner": workerID})
 		return ProcessingJob{}, VideoGenerationRequest{}, false, err
@@ -310,7 +314,9 @@ func (s *MongoStore) UpdateVideoProgress(ctx context.Context, id string, result 
 }
 
 func (s *MongoStore) CompleteVideo(ctx context.Context, id, workerID string, result VideoGenerationResult, at time.Time) (ProcessingJob, error) {
-	defer func(){ _,_ = s.visualLocks.DeleteOne(context.WithoutCancel(ctx), bson.M{"_id":"shotvl-global","owner":workerID}) }()
+	defer func() {
+		_, _ = s.visualLocks.DeleteOne(context.WithoutCancel(ctx), bson.M{"_id": "shotvl-global", "owner": workerID})
+	}()
 	var stored storedProcessingJob
 	err := s.jobs.FindOneAndUpdate(ctx, bson.M{"id": id, "kind": "providerVideo", "state": JobRunning}, bson.M{"$set": bson.M{"state": JobSucceeded, "videoresult": result, "updatedat": at, "lasterror": ""}}, options.FindOneAndUpdate().SetReturnDocument(options.After)).Decode(&stored)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -320,7 +326,9 @@ func (s *MongoStore) CompleteVideo(ctx context.Context, id, workerID string, res
 }
 
 func (s *MongoStore) FailVideo(ctx context.Context, id, workerID string, result VideoGenerationResult, message string, at time.Time) error {
-	defer func(){ _,_ = s.visualLocks.DeleteOne(context.WithoutCancel(ctx), bson.M{"_id":"shotvl-global","owner":workerID}) }()
+	defer func() {
+		_, _ = s.visualLocks.DeleteOne(context.WithoutCancel(ctx), bson.M{"_id": "shotvl-global", "owner": workerID})
+	}()
 	_, err := s.jobs.UpdateOne(ctx, bson.M{"id": id, "kind": "providerVideo"}, bson.M{"$set": bson.M{"state": JobFailed, "videoresult": result, "updatedat": at, "lasterror": message}})
 	return err
 }

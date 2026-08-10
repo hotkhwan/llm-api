@@ -95,7 +95,7 @@ func (q *CloudVideoPipeline) runOne(ctx context.Context) bool {
 }
 
 func (q *CloudVideoPipeline) process(ctx context.Context, jobID string, request VideoGenerationRequest, result *VideoGenerationResult) error {
-	if request.Provider == "wan" {
+	if isLocalProductPreviewProvider(request.Provider) {
 		return q.processLocalPreview(ctx, jobID, request, result)
 	}
 	if q.Fidelity == nil || q.Cinematic == nil || q.Reviser == nil {
@@ -142,13 +142,14 @@ func (q *CloudVideoPipeline) process(ctx context.Context, jobID string, request 
 	return q.Jobs.UpdateVideoProgress(ctx, jobID, *result, q.Now().UTC())
 }
 
-// processLocalPreview renders one five-second portrait clip containing the
-// three production beats. It deliberately skips paid fidelity services and
-// leaves product/cinematic review to the asynchronous advisory QC flow.
+// processLocalPreview renders one bounded portrait concept clip containing
+// the three production beats. Local previews deliberately skip paid fidelity
+// services and leave product/cinematic review to the asynchronous advisory QC
+// flow. They are acquisition previews, never production-fidelity proof.
 func (q *CloudVideoPipeline) processLocalPreview(ctx context.Context, jobID string, request VideoGenerationRequest, result *VideoGenerationResult) error {
 	provider := q.Providers[request.Provider]
-	if provider == nil || provider.Name() != "wan" {
-		return fmt.Errorf("Wan local preview runtime is unavailable")
+	if provider == nil || provider.Name() != request.Provider || !isLocalProductPreviewProvider(request.Provider) {
+		return fmt.Errorf("%s local preview runtime is unavailable", request.Provider)
 	}
 	reference, err := readObjectBounded(ctx, q.Reader, request.Reference.StorageKey, maxProviderReferenceBytes)
 	if err != nil {
@@ -161,17 +162,17 @@ func (q *CloudVideoPipeline) processLocalPreview(ctx context.Context, jobID stri
 		MissionID:     request.MissionID,
 		Shot:          ProductionShot{ShotID: "local-preview"},
 		Revision:      1,
-		Prompt:        wanPreviewPrompt(request.Draft.ProductionSpec),
+		Prompt:        localProductPreviewPrompt(request.Draft.ProductionSpec, request.Provider),
 		Reference:     reference,
 		ReferenceType: request.Reference.ContentType,
 	})
 	if err != nil {
-		return fmt.Errorf("Wan local preview: %w", err)
+		return fmt.Errorf("%s local preview: %w", request.Provider, err)
 	}
 	defer video.Body.Close()
 	metadata, err := q.Objects.Put(ctx, request.OutputKey, "video/mp4", io.LimitReader(video.Body, maxProviderVideoBytes+1))
 	if err != nil || metadata.Bytes <= 0 || metadata.Bytes > maxProviderVideoBytes {
-		return fmt.Errorf("store Wan local preview: %w", err)
+		return fmt.Errorf("store %s local preview: %w", request.Provider, err)
 	}
 	shot.ProviderTask = video.TaskID
 	shot.StorageKey = request.OutputKey
@@ -184,10 +185,23 @@ func (q *CloudVideoPipeline) processLocalPreview(ctx context.Context, jobID stri
 	return q.Jobs.UpdateVideoProgress(ctx, jobID, *result, q.Now().UTC())
 }
 
-func wanPreviewPrompt(spec ProductionSpec) string {
+func localProductPreviewPrompt(spec ProductionSpec, provider string) string {
 	product, _ := json.Marshal(spec.Continuity.Product)
 	shots, _ := json.Marshal(spec.Shots)
-	return fmt.Sprintf("Create one 5-second portrait 9:16 local product preview from the attached reference image. Compress the following three story beats into one fast sequence with hard visual emphasis and no text overlays: %s. The product is an immutable hero asset: preserve exact colors, silhouette, proportions, component count and layout, material, logo, label and every visible character from the reference. Never redesign, replace, multiply, crop away, or morph the product. Product bible: %s.", shots, product)
+	audio := "Generate synchronized, subtle commercial sound effects and music; no narration or dialogue."
+	if provider == "hunyuan" || provider == "wan" {
+		audio = "No text overlays. Audio is added later by the deterministic KWANNI editor."
+	}
+	return fmt.Sprintf("Create one 5-second portrait 9:16 product concept preview from the attached reference image. Compress the following three story beats into one fast sequence with hard visual emphasis and no text overlays: %s. The product is an immutable hero asset: preserve exact colors, silhouette, proportions, component count and layout, material, logo, label and every visible character from the reference. Never redesign, replace, multiply, crop away, or morph the product. %s Product bible: %s.", shots, audio, product)
+}
+
+func isLocalProductPreviewProvider(provider string) bool {
+	switch provider {
+	case "wan", "hunyuan", "ltx":
+		return true
+	default:
+		return false
+	}
 }
 
 // WanLocalProvider talks only to the private, project-owned Wan runtime. The
@@ -201,6 +215,26 @@ type WanLocalProvider struct {
 func (v WanLocalProvider) Name() string { return "wan" }
 
 func (v WanLocalProvider) Generate(ctx context.Context, request ProviderVideoRequest) (ProviderVideo, error) {
+	return generateLocalPreview(ctx, v.Name(), v.Endpoint, v.APIKey, v.Client, request)
+}
+
+// LocalProductPreviewProvider uses the same private project-owned HTTP
+// contract for Hunyuan and LTX. Runtime implementations remain isolated and
+// scaled to zero; credentials are never carried in the payload.
+type LocalProductPreviewProvider struct {
+	Provider string
+	Endpoint string
+	APIKey   string
+	Client   *http.Client
+}
+
+func (v LocalProductPreviewProvider) Name() string { return v.Provider }
+
+func (v LocalProductPreviewProvider) Generate(ctx context.Context, request ProviderVideoRequest) (ProviderVideo, error) {
+	return generateLocalPreview(ctx, v.Name(), v.Endpoint, v.APIKey, v.Client, request)
+}
+
+func generateLocalPreview(ctx context.Context, provider, endpoint, apiKey string, client *http.Client, request ProviderVideoRequest) (ProviderVideo, error) {
 	payload := map[string]any{
 		"prompt":          request.Prompt,
 		"referenceImage":  "data:" + request.ReferenceType + ";base64," + base64.StdEncoding.EncodeToString(request.Reference),
@@ -213,15 +247,14 @@ func (v WanLocalProvider) Generate(ctx context.Context, request ProviderVideoReq
 	if err != nil {
 		return ProviderVideo{}, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(v.Endpoint, "/")+"/generate", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(endpoint, "/")+"/generate", bytes.NewReader(body))
 	if err != nil {
 		return ProviderVideo{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	if v.APIKey != "" {
-		req.Header.Set("Authorization", "Bearer "+v.APIKey)
+	if apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+apiKey)
 	}
-	client := v.Client
 	if client == nil {
 		client = http.DefaultClient
 	}

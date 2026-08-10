@@ -110,6 +110,12 @@ func run(logger *slog.Logger) error {
 	if cfg.WanURL != "" && cfg.WanAPIKey != "" {
 		providers["wan"] = mission.WanLocalProvider{Endpoint: cfg.WanURL, APIKey: cfg.WanAPIKey, Client: &http.Client{Timeout: cfg.WanTimeout}}
 	}
+	if cfg.HunyuanURL != "" && cfg.HunyuanAPIKey != "" {
+		providers["hunyuan"] = mission.LocalProductPreviewProvider{Provider: "hunyuan", Endpoint: cfg.HunyuanURL, APIKey: cfg.HunyuanAPIKey, Client: &http.Client{Timeout: cfg.HunyuanTimeout}}
+	}
+	if cfg.LTXURL != "" && cfg.LTXAPIKey != "" {
+		providers["ltx"] = mission.LocalProductPreviewProvider{Provider: "ltx", Endpoint: cfg.LTXURL, APIKey: cfg.LTXAPIKey, Client: &http.Client{Timeout: cfg.LTXTimeout}}
+	}
 	if len(providers) > 0 && durableStore != nil && durableObjects != nil {
 		fidelity := mission.OpenAIProductFidelity{Endpoint: cfg.FidelityVLMURL, Model: cfg.FidelityVLMModel, ModelRevision: cfg.FidelityVLMModelRevision, APIKey: cfg.FidelityVLMAPIKey, Threshold: cfg.FidelityVLMThreshold, Client: &http.Client{Timeout: 5 * time.Minute}}
 		reviser := mission.OpenAIShotReviser{Endpoint: cfg.LocalLLMURL, Model: cfg.LocalLLMModel, APIKey: cfg.LocalLLMAPIKey, Client: &http.Client{Timeout: cfg.LocalLLMTimeout}}

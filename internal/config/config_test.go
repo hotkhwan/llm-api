@@ -82,11 +82,33 @@ func TestLoadRejectsInvalidValues(t *testing.T) {
 		{"WAN_URL": "http://wan.invalid"},
 		{"WAN_TIMEOUT": "30s"},
 		{"WAN_TIMEOUT": "61m"},
+		{"HUNYUAN_URL": "not-a-url", "HUNYUAN_API_KEY": "test"},
+		{"HUNYUAN_URL": "http://hunyuan.invalid"},
+		{"HUNYUAN_API_KEY": "test"},
+		{"HUNYUAN_TIMEOUT": "30s"},
+		{"LTX_URL": "http://user:secret@ltx.invalid", "LTX_API_KEY": "test"},
+		{"LTX_URL": "http://ltx.invalid"},
+		{"LTX_API_KEY": "test"},
+		{"LTX_TIMEOUT": "61m"},
 	}
 	for _, values := range tests {
 		if _, err := Load(func(key string) string { return values[key] }); err == nil {
 			t.Fatalf("Load() accepted invalid values: %#v", values)
 		}
+	}
+}
+
+func TestLoadAcceptsPrivateHunyuanAndLTXRuntimes(t *testing.T) {
+	values := map[string]string{
+		"HUNYUAN_URL": "http://kwanni-hunyuan.dev.svc.cluster.local:8091", "HUNYUAN_API_KEY": "hunyuan-test", "HUNYUAN_TIMEOUT": "15m",
+		"LTX_URL": "http://kwanni-ltx.dev.svc.cluster.local:8092", "LTX_API_KEY": "ltx-test", "LTX_TIMEOUT": "20m",
+	}
+	cfg, err := Load(func(key string) string { return values[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.HunyuanTimeout != 15*time.Minute || cfg.LTXTimeout != 20*time.Minute || cfg.HunyuanURL == "" || cfg.LTXURL == "" {
+		t.Fatalf("unexpected local runtime config: %#v", cfg)
 	}
 }
 

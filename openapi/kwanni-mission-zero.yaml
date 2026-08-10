@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: KWANNI Mission Zero API
-  version: 0.6.0
+  version: 0.7.0
   description: Image-first Mission Zero API. It does not promise sales or income.
 servers:
   - url: /v1
@@ -119,7 +119,7 @@ paths:
               type: object
               required: [provider]
               properties:
-                provider: { type: string, enum: [wan, veo, seedance] }
+                provider: { type: string, enum: [hunyuan, ltx, wan, veo, seedance] }
       responses:
         '202':
           description: Durable generation job queued or resumed; clients may leave and return later.
@@ -441,7 +441,7 @@ components:
       type: object
       required: [provider, mode, state, shots, queuedAt, estimatedReadyAt, estimateSeconds, updatedAt]
       properties:
-        provider: { type: string, enum: [wan, veo, seedance] }
+        provider: { type: string, enum: [hunyuan, ltx, wan, veo, seedance] }
         mode: { type: string, enum: [localPreview, cloudFinal] }
         state: { type: string, enum: [queued, rendering, verifying, revising, assembling, succeeded, failed] }
         job: { $ref: '#/components/schemas/ProcessingJob' }

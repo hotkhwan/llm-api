@@ -85,7 +85,7 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 	if m.VideoGeneration != nil {
 		if m.VideoGeneration.Mode == "" {
 			m.VideoGeneration.Mode = "cloudFinal"
-			if m.VideoGeneration.Provider == "wan" {
+			if isLocalProductPreviewProvider(m.VideoGeneration.Provider) {
 				m.VideoGeneration.Mode = "localPreview"
 			}
 		}
@@ -140,8 +140,8 @@ func (s *Service) Get(ctx context.Context, id string) (Mission, error) {
 
 func (s *Service) GenerateVideo(ctx context.Context, id, provider string) (Mission, error) {
 	provider = strings.ToLower(strings.TrimSpace(provider))
-	if provider != "wan" && provider != "veo" && provider != "seedance" {
-		return Mission{}, fmt.Errorf("provider must be wan, veo or seedance")
+	if provider != "wan" && provider != "hunyuan" && provider != "ltx" && provider != "veo" && provider != "seedance" {
+		return Mission{}, fmt.Errorf("provider must be hunyuan, ltx, wan, veo or seedance")
 	}
 	if s.video == nil {
 		return Mission{}, fmt.Errorf("video generation runtime is not configured")
@@ -179,8 +179,13 @@ func (s *Service) GenerateVideo(ctx context.Context, id, provider string) (Missi
 	now := s.now().UTC()
 	estimate := 20 * time.Minute
 	mode := "cloudFinal"
-	if provider == "wan" {
-		estimate = 30 * time.Minute
+	if isLocalProductPreviewProvider(provider) {
+		estimate = 5 * time.Minute
+		if provider == "wan" {
+			estimate = 30 * time.Minute
+		} else if provider == "ltx" {
+			estimate = 10 * time.Minute
+		}
 		mode = "localPreview"
 	}
 	retryingFailedGeneration := m.VideoGeneration != nil && m.VideoGeneration.State == GenerationFailed
@@ -240,10 +245,7 @@ func (s *Service) reconcileVideoGeneration(ctx context.Context, m *Mission) erro
 	case JobSucceeded:
 		m.VideoGeneration.State = GenerationSucceeded
 		m.VideoGeneration.Warning = ""
-		width, height := 1080, 1920
-		if m.VideoGeneration.Provider == "wan" {
-			width, height = 704, 1280
-		}
+		width, height := videoOutputDimensions(m.VideoGeneration.Provider)
 		m.Export = &Export{StorageKey: m.VideoGeneration.OutputKey, Format: "video/mp4", Width: width, Height: height, JobID: job.ID, DownloadURL: s.downloadURL(ctx, m.VideoGeneration.OutputKey)}
 		from := m.State
 		m.State = StateExported
@@ -258,6 +260,19 @@ func (s *Service) reconcileVideoGeneration(ctx context.Context, m *Mission) erro
 		return s.save(ctx, m)
 	}
 	return nil
+}
+
+func videoOutputDimensions(provider string) (int, int) {
+	switch provider {
+	case "hunyuan":
+		return 480, 848
+	case "ltx":
+		return 448, 768
+	case "wan":
+		return 704, 1280
+	default:
+		return 1080, 1920
+	}
 }
 
 func isPostExportState(state State) bool {

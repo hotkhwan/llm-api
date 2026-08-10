@@ -1,6 +1,6 @@
 # KWANNI API
 
-Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.6.0`
+Go/Fiber backend for the KWANNI guided affiliate starter. Version `0.7.0`
 implements the first durable end-to-end Mission Zero slice:
 
 `product facts → one exact reference image → Qwen CPS → Veo/Seedance → Product Fidelity VLM+OCR → ShotVL → targeted Qwen shot repair → FFmpeg → SeaweedFS → download → mark posted → outcome`
@@ -62,12 +62,21 @@ when explicitly enabled for a controlled development/Alpha environment.
 
 Configuration is restricted to the non-secret settings documented in `.env.example`. JSON request logs are written to stdout and include a validated or generated `X-Request-ID`.
 
-Mission Zero defaults to the private Wan2.2 TI2V-5B runtime documented under
-`deploy/dev/wan`: one exact product image produces one five-second portrait
-local preview, with a durable 30-minute initial ETA and asynchronous advisory
-ShotVL review. The browser can leave and resume from MongoDB; output is stored
-in SeaweedFS. Wan is not product-fidelity proof, so manual review remains
-required. The local runtime has no public route and no per-video API charge.
+Mission Zero's product-preview baseline is the private HunyuanVideo-1.5 480p
+I2V step-distilled runtime under `deploy/dev/hunyuan`. One exact product image
+produces a five-second portrait preview with a durable five-minute initial ETA.
+LTX-2.3 under `deploy/dev/ltx` is an audio-video challenger and stays disabled
+until it wins the blind DGX benchmark and its license is accepted. The older
+Wan runtime remains disabled as regression evidence after a 24m38s/5-second
+low-quality point-DGX baseline. All local previews remain advisory: the browser
+can leave and resume from MongoDB, output is stored in SeaweedFS, and human
+product review is required.
+
+MuseTalk under `deploy/dev/musetalk` is a separate presenter lip-sync runtime.
+It requires a consented presenter video and licensed narration audio and never
+uses the product reference as a face. Its portal/API flow remains disabled until
+consent, retention and deletion contracts are implemented. Every GPU runtime
+has zero replicas and no public route by default.
 
 Optional paid provider credentials are Kubernetes Secret values only. Veo uses the current
 Gemini Veo 3.1 long-running REST contract and sends the product as an immutable

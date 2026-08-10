@@ -1,0 +1,35 @@
+# HunyuanVideo-1.5 product preview (Development)
+
+This project-owned, private runtime is KWANNI's product-preview baseline. It
+uses the official 480p I2V step-distilled checkpoint (12 steps), always receives
+the original product image, has no public route, and is scaled to zero by
+default. It is not part of KSys or KDeploy.
+
+Pinned inputs:
+
+- `tencent/HunyuanVideo-1.5` model revision `9b49404b...`, transformer
+  `480p_i2v_step_distilled`
+- `Tencent-Hunyuan/HunyuanVideo-1.5` source revision `60783e70...`
+- Qwen2.5-VL-7B, ByT5, Glyph-SDXL-v2 and FLUX.1-Redux vision encoder revisions
+  are pinned in `scripts/hunyuan-runtime.sh`
+- NVIDIA ARM64 PyTorch image digest `sha256:dcae8df0...`
+
+The FLUX.1-Redux vision encoder is gated. An operator must first accept its
+Hugging Face terms and pass a root-owned token file to `prefetch`; no token is
+stored in Git or Kubernetes. This gate means the runtime must not be advertised
+as available until the full prefetch and one DGX benchmark pass.
+
+```bash
+sudo scripts/hunyuan-runtime.sh prefetch /secure/path/hf-token
+sudo scripts/hunyuan-runtime.sh prepare
+scripts/hunyuan-runtime.sh install
+scripts/hunyuan-runtime.sh wire-api /secure/path/hunyuan-api-key
+scripts/hunyuan-runtime.sh up
+scripts/hunyuan-runtime.sh status
+scripts/hunyuan-runtime.sh down
+```
+
+Use an exclusive GPU window: stop Qwen before scaling Hunyuan up, scale
+Hunyuan down after the durable preview job finishes, then restore Qwen.
+Hunyuan does not generate audio; the presenter/audio stage is separate.
+Product fidelity is advisory until visual/OCR and human review pass.

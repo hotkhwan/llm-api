@@ -66,6 +66,12 @@ type Config struct {
 	WanURL                     string
 	WanAPIKey                  string
 	WanTimeout                 time.Duration
+	HunyuanURL                 string
+	HunyuanAPIKey              string
+	HunyuanTimeout             time.Duration
+	LTXURL                     string
+	LTXAPIKey                  string
+	LTXTimeout                 time.Duration
 }
 
 type LookupEnv func(string) string
@@ -118,6 +124,12 @@ func Load(lookup LookupEnv) (Config, error) {
 		WanURL:                     strings.TrimSpace(lookup("WAN_URL")),
 		WanAPIKey:                  strings.TrimSpace(lookup("WAN_API_KEY")),
 		WanTimeout:                 30 * time.Minute,
+		HunyuanURL:                 strings.TrimSpace(lookup("HUNYUAN_URL")),
+		HunyuanAPIKey:              strings.TrimSpace(lookup("HUNYUAN_API_KEY")),
+		HunyuanTimeout:             15 * time.Minute,
+		LTXURL:                     strings.TrimSpace(lookup("LTX_URL")),
+		LTXAPIKey:                  strings.TrimSpace(lookup("LTX_API_KEY")),
+		LTXTimeout:                 20 * time.Minute,
 	}
 
 	if !isEnvironment(cfg.Environment) {
@@ -177,6 +189,37 @@ func Load(lookup LookupEnv) (Config, error) {
 		}
 		if cfg.WanAPIKey == "" {
 			return Config{}, fmt.Errorf("WAN_API_KEY is required when Wan is enabled")
+		}
+	}
+	for _, local := range []struct {
+		name       string
+		endpoint   string
+		key        string
+		timeoutKey string
+		timeout    *time.Duration
+	}{
+		{name: "Hunyuan", endpoint: cfg.HunyuanURL, key: cfg.HunyuanAPIKey, timeoutKey: "HUNYUAN_TIMEOUT", timeout: &cfg.HunyuanTimeout},
+		{name: "LTX", endpoint: cfg.LTXURL, key: cfg.LTXAPIKey, timeoutKey: "LTX_TIMEOUT", timeout: &cfg.LTXTimeout},
+	} {
+		if raw := strings.TrimSpace(lookup(local.timeoutKey)); raw != "" {
+			value, parseErr := time.ParseDuration(raw)
+			if parseErr != nil || value < time.Minute || value > time.Hour {
+				return Config{}, fmt.Errorf("%s must be between 1m and 1h", local.timeoutKey)
+			}
+			*local.timeout = value
+		}
+		if local.endpoint == "" {
+			if local.key != "" {
+				return Config{}, fmt.Errorf("%s_URL is required when %s_API_KEY is set", strings.ToUpper(local.name), strings.ToUpper(local.name))
+			}
+			continue
+		}
+		parsed, parseErr := url.Parse(local.endpoint)
+		if parseErr != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+			return Config{}, fmt.Errorf("%s_URL must be an absolute credential-free http(s) URL", strings.ToUpper(local.name))
+		}
+		if local.key == "" {
+			return Config{}, fmt.Errorf("%s_API_KEY is required when %s is enabled", strings.ToUpper(local.name), local.name)
 		}
 	}
 	if raw := strings.TrimSpace(lookup("SHOTVL_THRESHOLD")); raw != "" {
