@@ -24,11 +24,9 @@ case "$command" in
     install -d -m 0750 "$model_dir"
     podman run --rm --network host -v "$model_dir:/models" -e HF_TOKEN="$token" "$prefetch_image" \
       python3 -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='tencent/HunyuanVideo-1.5', revision='$model_revision', local_dir='/models', allow_patterns=['config.json','scheduler/*','vae/*','transformer/480p_i2v_step_distilled/*']); snapshot_download(repo_id='Qwen/Qwen2.5-VL-7B-Instruct', revision='$qwen_revision', local_dir='/models/text_encoder/llm'); snapshot_download(repo_id='google/byt5-small', revision='$byt5_revision', local_dir='/models/text_encoder/byt5-small'); snapshot_download(repo_id='black-forest-labs/FLUX.1-Redux-dev', revision='$flux_revision', local_dir='/models/vision_encoder/siglip')"
-    if test ! -d "$model_dir/text_encoder/Glyph-SDXL-v2/.git"; then
-      git clone https://www.modelscope.cn/AI-ModelScope/Glyph-SDXL-v2.git "$model_dir/text_encoder/Glyph-SDXL-v2"
-    fi
-    git -C "$model_dir/text_encoder/Glyph-SDXL-v2" fetch --depth=1 origin "$glyph_revision"
-    git -C "$model_dir/text_encoder/Glyph-SDXL-v2" checkout --detach "$glyph_revision"
+    podman run --rm --network host -v "$model_dir:/models" "$prefetch_image" \
+      sh -ceu "python3 -m pip install --no-cache-dir modelscope==1.39.1 >/dev/null; python3 -c \"from modelscope import snapshot_download; snapshot_download('AI-ModelScope/Glyph-SDXL-v2', revision='$glyph_revision', local_dir='/models/text_encoder/Glyph-SDXL-v2')\""
+    test -s "$model_dir/text_encoder/Glyph-SDXL-v2/checkpoints/byt5_model.pt"
     ;;
   prepare)
     install -d -m 0750 "$runtime_dir" "$runtime_dir/python"
