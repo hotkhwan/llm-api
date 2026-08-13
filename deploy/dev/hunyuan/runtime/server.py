@@ -18,6 +18,7 @@ AUTH = os.environ["HUNYUAN_API_KEY"]
 MODEL_DIR = os.environ.get("HUNYUAN_MODEL_DIR", "/models")
 SOURCE_ROOT = os.environ.get("HUNYUAN_ROOT", "/runtime/HunyuanVideo-1.5")
 TIMEOUT = int(os.environ.get("HUNYUAN_GENERATION_TIMEOUT_SECONDS", "900"))
+OFFLOADING = os.environ.get("HUNYUAN_OFFLOADING", "false").lower() == "true"
 LOCK = threading.Lock()
 
 
@@ -102,8 +103,10 @@ class Handler(BaseHTTPRequestHandler):
                     "--video_length", "121", "--num_inference_steps", "12",
                     "--enable_step_distill", "true", "--cfg_distilled", "false",
                     "--rewrite", "false", "--sr", "false", "--sparse_attn", "false",
-                    "--offloading", "true", "--group_offloading", "true",
-                    "--overlap_group_offloading", "true", "--seed", "123",
+                    "--offloading", str(OFFLOADING).lower(),
+                    "--group_offloading", str(OFFLOADING).lower(),
+                    "--overlap_group_offloading", str(OFFLOADING).lower(),
+                    "--seed", "123",
                 ]
                 subprocess.run(command, check=True, timeout=TIMEOUT, cwd=SOURCE_ROOT)
                 result = output_path.read_bytes()

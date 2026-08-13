@@ -45,6 +45,13 @@ Hunyuan down after the durable preview job finishes, then restore Qwen.
 Hunyuan does not generate audio; the presenter/audio stage is separate.
 Product fidelity is advisory until visual/OCR and human review pass.
 
+The DGX Spark profile keeps the distilled model resident
+(`HUNYUAN_OFFLOADING=false`). A measured group-offload trial held sampling at
+step 0 for more than six minutes because it repeatedly moved layers; that mode
+is intended for smaller discrete-GPU memory budgets, not Spark's 128 GB unified
+memory. Keep Hunyuan and Qwen mutually exclusive instead of re-enabling
+offload to make them co-resident.
+
 NVIDIA PyTorch 26.06 currently includes a newer torchao in which `NF4Tensor`
 moved. Pinned diffusers 0.35.0 handles that as a warning but initializes its
 logger too late, raising `NameError` during import. `prepare` applies one exact,

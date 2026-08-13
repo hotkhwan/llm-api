@@ -27,6 +27,7 @@ spec:
             - { name: HUNYUAN_ROOT, value: /runtime/HunyuanVideo-1.5 }
             - { name: PYTHONPATH, value: /runtime/python:/runtime/HunyuanVideo-1.5 }
             - { name: HUNYUAN_GENERATION_TIMEOUT_SECONDS, value: "900" }
+            - { name: HUNYUAN_OFFLOADING, value: "false" }
           ports: [{ name: http, containerPort: 8091 }]
           resources:
             requests: { cpu: "8", memory: 56Gi, nvidia.com/gpu: "1" }
