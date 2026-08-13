@@ -8,6 +8,10 @@ source = target.read_text()
 logger_line = "logger = logging.get_logger(__name__)\n"
 anchor = "\n\nif TYPE_CHECKING:\n"
 late = "\n\nlogger = logging.get_logger(__name__)\n\n\ndef _quantization_type"
+early = "\n\nlogger = logging.get_logger(__name__)\n\n\nif TYPE_CHECKING:\n"
+if early in source and late not in source and source.count(logger_line) == 1:
+    print("diffusers torchao logger patch already applied")
+    raise SystemExit(0)
 if source.count(logger_line) != 1 or anchor not in source or late not in source:
     raise SystemExit("unexpected diffusers 0.35.0 torchao_quantizer source; refusing patch")
 source = source.replace(anchor, "\n\n" + logger_line + anchor, 1)
