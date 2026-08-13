@@ -40,3 +40,9 @@ Use an exclusive GPU window: stop Qwen before scaling Hunyuan up, scale
 Hunyuan down after the durable preview job finishes, then restore Qwen.
 Hunyuan does not generate audio; the presenter/audio stage is separate.
 Product fidelity is advisory until visual/OCR and human review pass.
+
+NVIDIA PyTorch 26.06 currently includes a newer torchao in which `NF4Tensor`
+moved. Pinned diffusers 0.35.0 handles that as a warning but initializes its
+logger too late, raising `NameError` during import. `prepare` applies one exact,
+fail-closed source-order compatibility patch after installation; it does not
+change inference or model weights and refuses unknown diffusers source.

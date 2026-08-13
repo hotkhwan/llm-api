@@ -38,9 +38,12 @@ case "$command" in
     git -C "$runtime_dir/HunyuanVideo-1.5" fetch --depth=1 origin "$source_revision"
     git -C "$runtime_dir/HunyuanVideo-1.5" checkout --detach "$source_revision"
     install -m 0555 deploy/dev/hunyuan/runtime/server.py "$runtime_dir/server.py"
+    install -m 0555 deploy/dev/hunyuan/runtime/patch_diffusers.py "$runtime_dir/patch_diffusers.py"
     install -m 0444 deploy/dev/hunyuan/runtime/requirements.txt "$runtime_dir/requirements.txt"
     podman run --rm --network host -v "$runtime_dir:/runtime" "$runtime_image" \
       python3 -m pip install --no-cache-dir --no-deps --target /runtime/python -r /runtime/requirements.txt
+    podman run --rm -v "$runtime_dir:/runtime" "$runtime_image" \
+      python3 /runtime/patch_diffusers.py
     podman run --rm -v "$runtime_dir:/runtime:ro" -v "$model_dir:/models:ro" \
       -e PYTHONPATH=/runtime/python:/runtime/HunyuanVideo-1.5 "$runtime_image" \
       python3 -c "import torch, transformers, diffusers; from hyvideo.pipelines.hunyuan_video_pipeline import HunyuanVideo_1_5_Pipeline; assert torch.version.cuda; assert HunyuanVideo_1_5_Pipeline.get_transformer_version('480p','i2v',False,True,False) == '480p_i2v_step_distilled'; print('Hunyuan dependencies: PASS')"
