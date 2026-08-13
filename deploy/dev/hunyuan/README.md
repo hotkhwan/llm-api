@@ -13,8 +13,9 @@ Pinned inputs:
 - Qwen2.5-VL-7B, ByT5, Glyph-SDXL-v2 and FLUX.1-Redux vision encoder revisions
   are pinned in `scripts/hunyuan-runtime.sh`
 - Glyph-SDXL-v2 is fetched with pinned ModelScope `1.39.1` and the runtime
-  refuses to continue unless the real `checkpoints/byt5_model.pt` is present;
-  a Git checkout without LFS is not accepted
+  fetch is limited to the assets and ByT5 checkpoint used by Hunyuan. The
+  runtime refuses to continue unless the real `checkpoints/byt5_model.pt` is
+  present; a Git checkout without LFS is not accepted
 - NVIDIA ARM64 PyTorch image digest `sha256:dcae8df0...`
 
 The FLUX.1-Redux vision encoder is gated. An operator must first accept its

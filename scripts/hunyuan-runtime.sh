@@ -23,7 +23,7 @@ case "$command" in
     podman run --rm --network host -v "$model_dir:/models" -v "$token_file:/run/secrets/hf-token:ro" "$prefetch_image" \
       sh -ceu "export HF_TOKEN=\"\$(tr -d '\\r\\n' </run/secrets/hf-token)\"; test -n \"\$HF_TOKEN\"; python3 -c \"from huggingface_hub import snapshot_download; snapshot_download(repo_id='tencent/HunyuanVideo-1.5', revision='$model_revision', local_dir='/models', allow_patterns=['config.json','scheduler/*','vae/*','transformer/480p_i2v_step_distilled/*']); snapshot_download(repo_id='Qwen/Qwen2.5-VL-7B-Instruct', revision='$qwen_revision', local_dir='/models/text_encoder/llm'); snapshot_download(repo_id='google/byt5-small', revision='$byt5_revision', local_dir='/models/text_encoder/byt5-small'); snapshot_download(repo_id='black-forest-labs/FLUX.1-Redux-dev', revision='$flux_revision', local_dir='/models/vision_encoder/siglip')\""
     podman run --rm --network host -v "$model_dir:/models" "$prefetch_image" \
-      sh -ceu "python3 -m pip install --no-cache-dir modelscope==1.39.1 >/dev/null; python3 -c \"from modelscope import snapshot_download; snapshot_download('AI-ModelScope/Glyph-SDXL-v2', revision='$glyph_revision', local_dir='/models/text_encoder/Glyph-SDXL-v2')\""
+      sh -ceu "python3 -m pip install --no-cache-dir modelscope==1.39.1 >/dev/null; python3 -c \"from modelscope import snapshot_download; snapshot_download('AI-ModelScope/Glyph-SDXL-v2', revision='$glyph_revision', local_dir='/models/text_encoder/Glyph-SDXL-v2', allow_patterns=['assets/*', 'checkpoints/byt5_model.pt'])\""
     test -s "$model_dir/text_encoder/Glyph-SDXL-v2/checkpoints/byt5_model.pt"
     ;;
   prepare)
