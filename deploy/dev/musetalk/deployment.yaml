@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: kwanni-musetalk, namespace: dev, labels: { app: kwanni-musetalk } }
+spec:
+  replicas: 0
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: kwanni-musetalk } }
+  template:
+    metadata: { labels: { app: kwanni-musetalk } }
+    spec:
+      runtimeClassName: nvidia
+      automountServiceAccountToken: false
+      nodeSelector: { kubernetes.io/arch: arm64 }
+      containers:
+        - name: musetalk
+          image: nvcr.io/nvidia/pytorch@sha256:dcae8df08ef61b019b8eb109113428cba4ef0e37484c6e722406150dd5ada759
+          command: [/runtime/venv/bin/python]
+          args: [/runtime/server.py]
+          env:
+            - name: MUSETALK_API_KEY
+              valueFrom: { secretKeyRef: { name: kwanni-musetalk-auth, key: MUSETALK_API_KEY } }
+            - { name: MUSETALK_MODEL_DIR, value: /models }
+            - { name: MUSETALK_ROOT, value: /runtime/MuseTalk }
+            - { name: MUSETALK_GENERATION_TIMEOUT_SECONDS, value: "600" }
+          ports: [{ name: http, containerPort: 8093 }]
+          resources:
+            requests: { cpu: "4", memory: 16Gi, nvidia.com/gpu: "1" }
+            limits: { cpu: "12", memory: 48Gi, nvidia.com/gpu: "1" }
+          volumeMounts:
+            - { name: model, mountPath: /models, readOnly: true }
+            - { name: runtime, mountPath: /runtime, readOnly: true }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+      volumes:
+        - name: model
+          hostPath: { path: /opt/local/models/musetalk-1.5, type: Directory }
+        - name: runtime
+          hostPath: { path: /opt/local/runtimes/musetalk-1.5, type: Directory }

@@ -1,0 +1,545 @@
+openapi: 3.1.0
+info:
+  title: KWANNI Mission Zero API
+  version: 0.7.0
+  description: Image-first Mission Zero API. It does not promise sales or income.
+servers:
+  - url: /v1
+security:
+  - bearerAuth: []
+paths:
+  /missions:
+    post:
+      operationId: createMission
+      summary: Create a mission from manually entered product facts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMission'
+      responses:
+        '201':
+          description: Mission accepted with a three-shot guide
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Mission'
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /missions/{id}:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    get:
+      operationId: getMission
+      responses:
+        '200':
+          description: Current mission
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '404': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+  /missions/{id}/assets/{shot}:
+    parameters:
+      - { $ref: '#/components/parameters/MissionId' }
+      - name: shot
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 3 }
+    put:
+      operationId: uploadShot
+      summary: Upload one optional legacy image or video for a guided shot
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, contentEncoding: binary } }
+          image/png: { schema: { type: string, contentEncoding: binary } }
+          video/mp4: { schema: { type: string, contentEncoding: binary } }
+      responses:
+        '200':
+          description: Asset recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/product-references/{index}:
+    parameters:
+      - { $ref: '#/components/parameters/MissionId' }
+      - name: index
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 5 }
+    put:
+      operationId: putProductReference
+      summary: Upload or replace the one real product reference image required before drafting
+      description: Image-first clients use index 1. Indices 2-5 remain accepted for legacy upload compatibility, but a new Draft requires exactly one reference.
+      requestBody:
+        required: true
+        content:
+          image/jpeg: { schema: { type: string, contentEncoding: binary } }
+          image/png: { schema: { type: string, contentEncoding: binary } }
+          image/webp: { schema: { type: string, contentEncoding: binary } }
+      responses:
+        '200': { description: Product reference recorded }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/draft:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: generateDraft
+      summary: Generate a three-shot CPS and versioned Veo/Seedance prompts from product facts and one reference image
+      responses:
+        '200':
+          description: Localized caption, three-shot Canonical Production Spec, and deterministic provider prompts are ready
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/export:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: exportDraft
+      responses:
+        '200':
+          description: Export queued, running, failed, or completed with a verified MP4 and short-lived download URL
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/generate-video:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: generateVideo
+      summary: Queue a local Wan preview or an explicitly enabled cloud final
+      description: Wan renders one free five-second local preview from the exact product image and leaves ShotVL as asynchronous advisory QC. Paid Veo/Seedance remain disabled unless operators configure their private credentials and gates.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider]
+              properties:
+                provider: { type: string, enum: [hunyuan, ltx, wan, veo, seedance] }
+      responses:
+        '202':
+          description: Durable generation job queued or resumed; clients may leave and return later.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/posted:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: markPosted
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform]
+              properties:
+                platform: { type: string }
+                postUrl: { type: string, format: uri }
+      responses:
+        '200':
+          description: First Post recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mission' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/outcome:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    put:
+      operationId: recordOutcome
+      summary: Record observed views, clicks and sales and receive the next action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [views, clicks, sales]
+              properties:
+                views: { type: integer, format: int64, minimum: 0 }
+                clicks: { type: integer, format: int64, minimum: 0 }
+                sales: { type: integer, format: int64, minimum: 0 }
+      responses:
+        '200': { description: Outcome and next action recorded }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/visual-qc:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    post:
+      operationId: enqueueVisualQC
+      summary: Enqueue or retry advisory ShotVL review after verified export
+      description: Never blocks download or posting. Poll the mission resource for job/report changes.
+      responses:
+        '200': { description: Advisory review queued or existing job returned }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+  /missions/{id}/visual-qc/override:
+    parameters: [ { $ref: '#/components/parameters/MissionId' } ]
+    put:
+      operationId: overrideVisualQC
+      summary: Record the authenticated user's manual advisory decision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [accept, reject] }
+                reason: { type: string, minLength: 1, maxLength: 500 }
+      responses:
+        '200': { description: Manual override recorded without changing export/post availability }
+        '400': { $ref: '#/components/responses/Error' }
+        '401': { $ref: '#/components/responses/Error' }
+        '404': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    MissionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
+  responses:
+    Error:
+      description: Request failed
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: object
+                properties:
+                  code: { type: string }
+                  message: { type: string }
+                  requestId: { type: string }
+  schemas:
+    CreateMission:
+      type: object
+      required: [product, consentAccepted, privacyNoticeVersion]
+      properties:
+        locale:
+          type: string
+          enum: [th, en, zh]
+          default: th
+        consentAccepted: { type: boolean, const: true }
+        privacyNoticeVersion: { type: string, minLength: 1 }
+        product:
+          type: object
+          required: [name, description]
+          properties:
+            name: { type: string }
+            description: { type: string }
+            price: { type: string }
+            promotion: { type: string }
+            facts: { type: array, items: { type: string } }
+    Mission:
+      type: object
+      required: [id, userId, locale, product, state, shots, version, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        userId: { type: string }
+        locale: { type: string, enum: [th, en, zh], default: th }
+        product: { type: object }
+        state:
+          type: string
+          enum: [missionAccepted, captureStarted, assetsUploaded, draftGenerating, draftReady, videoGenerating, exportQueued, exported, posted, resultRecorded, nextMissionReady]
+        shots: { type: array, items: { type: object } }
+        assets: { type: array, items: { type: object } }
+        productReferences: { type: array, items: { $ref: '#/components/schemas/ProductReference' } }
+        draft: { $ref: '#/components/schemas/Draft' }
+        export: { $ref: '#/components/schemas/ExportArtifact' }
+        exportJob: { $ref: '#/components/schemas/ProcessingJob' }
+        posted: { type: object }
+        outcome: { $ref: '#/components/schemas/Outcome' }
+        nextAction: { $ref: '#/components/schemas/NextAction' }
+        visualQc: { $ref: '#/components/schemas/VisualQCState' }
+        videoGeneration: { $ref: '#/components/schemas/VideoGeneration' }
+        version: { type: integer, format: int64 }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    Draft:
+      type: object
+      required: [caption, cta, hashtags, timeline, generatedBy, productionSpec, roleExecutions, renderPrompts]
+      properties:
+        caption: { type: string, maxLength: 500 }
+        cta: { type: string }
+        hashtags: { type: array, maxItems: 12, items: { type: string } }
+        timeline:
+          description: Optional legacy manual-shot edit timeline; empty for the image-first flow.
+          type: array
+          minItems: 0
+          maxItems: 3
+          items: { type: object }
+        generatedBy: { type: string }
+        productionSpec: { $ref: '#/components/schemas/ProductionSpec' }
+        roleExecutions:
+          type: array
+          items:
+            type: object
+            required: [role, runtime]
+            properties:
+              role: { type: string, enum: [creativeDirector, storyDirector, brandGuard, productionPlanner, promptCompiler] }
+              runtime: { type: string }
+        renderPrompts: { $ref: '#/components/schemas/RenderPrompts' }
+    ProductReference:
+      type: object
+      required: [index, storageKey, contentType, bytes, sha256]
+      properties:
+        index: { type: integer, minimum: 1 }
+        storageKey: { type: string }
+        contentType: { type: string, enum: [image/jpeg, image/png, image/webp] }
+        bytes: { type: integer, format: int64, minimum: 1 }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        downloadUrl: { type: string, format: uri, description: Short-lived URL for attaching the exact original image to an image-to-video request. }
+    RenderPrompts:
+      type: object
+      required: [veo, seedance]
+      properties:
+        veo: { $ref: '#/components/schemas/RenderPrompt' }
+        seedance: { $ref: '#/components/schemas/RenderPrompt' }
+    RenderPrompt:
+      type: object
+      required: [provider, adapterVersion, prompt]
+      properties:
+        provider: { type: string, enum: [veo, seedance] }
+        adapterVersion:
+          type: string
+          enum: [kwanni.veo/v2, kwanni.seedance/v2]
+        prompt: { type: string, minLength: 1 }
+    ProductionSpec:
+      type: object
+      required: [schemaVersion, projectType, durationSeconds, platform, aspectRatio, creativeIntent, storyBeats, continuity, shots]
+      properties:
+        schemaVersion: { type: string, const: kwanni.production/v1 }
+        projectType: { type: string, const: affiliateShort }
+        durationSeconds: { type: integer, minimum: 6, maximum: 25 }
+        platform: { type: string }
+        aspectRatio: { type: string, const: '9:16' }
+        creativeIntent: { type: string }
+        storyBeats: { type: array, items: { type: string } }
+        continuity: { $ref: '#/components/schemas/ContinuityBible' }
+        shots:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: '#/components/schemas/ProductionShot' }
+        providerPrompts:
+          type: object
+          additionalProperties: { type: string }
+    ContinuityBible:
+      type: object
+      required: [product, character, wardrobe, makeup, location, lighting, camera]
+      properties:
+        product:
+          type: object
+          required: [name, referenceKeys, verifiedFacts, requiredDetails, forbiddenChanges]
+          properties:
+            name: { type: string }
+            referenceKeys: { type: array, minItems: 1, items: { type: string } }
+            verifiedFacts: { type: array, items: { type: string } }
+            requiredDetails: { type: array, items: { type: string } }
+            forbiddenChanges: { type: array, items: { type: string } }
+        character: { type: object, required: [description, constraints], properties: { description: { type: string }, constraints: { type: array, items: { type: string } } } }
+        wardrobe: { $ref: '#/components/schemas/BibleEntry' }
+        makeup: { $ref: '#/components/schemas/BibleEntry' }
+        location: { $ref: '#/components/schemas/BibleEntry' }
+        lighting:
+          type: object
+          required: [id, style, colorTemperatureKelvin]
+          properties: { id: { type: string }, style: { type: string }, colorTemperatureKelvin: { type: integer } }
+        camera:
+          type: object
+          required: [orientation, aspectRatio, constraints]
+          properties: { orientation: { type: string }, aspectRatio: { type: string }, constraints: { type: array, items: { type: string } } }
+    BibleEntry:
+      type: object
+      required: [id, description]
+      properties: { id: { type: string }, description: { type: string } }
+    ProductionShot:
+      type: object
+      required: [shotId, captureShot, durationSeconds, shotSize, cameraAngle, lensMm, cameraMovement, subjectAction, composition, lighting, continuity]
+      properties:
+        shotId: { type: string }
+        captureShot: { type: integer, minimum: 1, maximum: 3 }
+        durationSeconds: { type: integer, minimum: 1 }
+        shotSize: { type: string }
+        cameraAngle: { type: string }
+        lensMm: { type: integer, minimum: 1 }
+        cameraMovement: { type: string }
+        subjectAction: { type: string }
+        composition: { type: string }
+        lighting:
+          type: object
+          required: [style, keyDirection, colorTemperatureKelvin]
+          properties: { style: { type: string }, keyDirection: { type: string }, colorTemperatureKelvin: { type: integer } }
+        continuity:
+          type: object
+          required: [productOrientation, wardrobeId, locationId]
+          properties: { productOrientation: { type: string }, wardrobeId: { type: string }, locationId: { type: string } }
+    ProcessingJob:
+      type: object
+      required: [id, kind, state, attempt, idempotencyKey, updatedAt]
+      properties:
+        id: { type: string }
+        kind: { type: string, enum: [ffmpegExport, visualQc, providerVideo] }
+        state: { type: string, enum: [queued, running, succeeded, failed] }
+        attempt: { type: integer, minimum: 0, maximum: 3 }
+        idempotencyKey: { type: string }
+        lastError: { type: string }
+        updatedAt: { type: string, format: date-time }
+    ExportArtifact:
+      type: object
+      required: [storageKey, format, width, height, jobId]
+      properties:
+        storageKey: { type: string }
+        format: { type: string, const: video/mp4 }
+        width: { type: integer, const: 1080 }
+        height: { type: integer, const: 1920 }
+        jobId: { type: string }
+        downloadUrl: { type: string, format: uri, description: Present only after verified export; short-lived and renewed by authenticated GET. }
+    Outcome:
+      type: object
+      required: [views, clicks, sales, recordedAt]
+      properties:
+        views: { type: integer, format: int64, minimum: 0 }
+        clicks: { type: integer, format: int64, minimum: 0 }
+        sales: { type: integer, format: int64, minimum: 0 }
+        recordedAt: { type: string, format: date-time }
+    NextAction:
+      type: object
+      required: [kind, title, reason]
+      properties:
+        kind: { type: string, enum: [repeat, improveCTA, retryHook] }
+        title: { type: string }
+        reason: { type: string }
+    VisualQCState:
+      type: object
+      required: [history]
+      description: Advisory only; absence/failure never blocks export download or posting.
+      properties:
+        job: { $ref: '#/components/schemas/ProcessingJob' }
+        latestReport: { $ref: '#/components/schemas/VisualQCReport' }
+        history:
+          type: array
+          items: { $ref: '#/components/schemas/VisualQCReport' }
+        warning: { type: string }
+        manualOverride: { $ref: '#/components/schemas/VisualQCOverride' }
+    VideoGeneration:
+      type: object
+      required: [provider, mode, state, shots, queuedAt, estimatedReadyAt, estimateSeconds, updatedAt]
+      properties:
+        provider: { type: string, enum: [hunyuan, ltx, wan, veo, seedance] }
+        mode: { type: string, enum: [localPreview, cloudFinal] }
+        state: { type: string, enum: [queued, rendering, verifying, revising, assembling, succeeded, failed] }
+        job: { $ref: '#/components/schemas/ProcessingJob' }
+        shots:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            required: [shotId, revision, state, updatedAt]
+            properties:
+              shotId: { type: string }
+              revision: { type: integer, minimum: 1, maximum: 2 }
+              state: { type: string, enum: [queued, rendering, verifying, revising, assembling, succeeded, failed] }
+              storageKey: { type: string }
+              providerTask: { type: string }
+              fidelity: { $ref: '#/components/schemas/ProductFidelityReport' }
+              cinematic: { $ref: '#/components/schemas/VisualQCReport' }
+              defects: { type: array, items: { type: object } }
+              updatedAt: { type: string, format: date-time }
+        outputKey: { type: string }
+        warning: { type: string }
+        queuedAt: { type: string, format: date-time }
+        estimatedReadyAt: { type: string, format: date-time }
+        estimateSeconds: { type: integer, minimum: 60, maximum: 3600 }
+        updatedAt: { type: string, format: date-time }
+    ProductFidelityReport:
+      type: object
+      required: [modelRevision, score, threshold, passed, metrics]
+      properties:
+        modelRevision: { type: string }
+        score: { type: number, minimum: 0, maximum: 1 }
+        threshold: { type: number, minimum: 0, maximum: 1 }
+        passed: { type: boolean }
+        metrics:
+          type: object
+          required: [color, silhouette, proportions, layout, material, logoText]
+          additionalProperties: { type: number, minimum: 0, maximum: 1 }
+        referenceText: { type: array, items: { type: string } }
+        observedText: { type: array, items: { type: string } }
+        defects: { type: array, items: { type: object } }
+    VisualQCReport:
+      type: object
+      required: [revision, modelRevision, threshold, score, passed, evidenceFrames, shots, createdAt]
+      properties:
+        revision: { type: integer, minimum: 1 }
+        modelRevision: { type: string, minLength: 1 }
+        threshold: { type: number, minimum: 0, maximum: 1 }
+        score: { type: number, minimum: 0, maximum: 1 }
+        passed: { type: boolean }
+        evidenceFrames:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: { $ref: '#/components/schemas/EvidenceFrame' }
+        shots:
+          type: array
+          minItems: 3
+          maxItems: 3
+          items: { $ref: '#/components/schemas/VisualQCShot' }
+        createdAt: { type: string, format: date-time }
+    EvidenceFrame:
+      type: object
+      required: [id, storageKey, timestampMs]
+      properties:
+        id: { type: string }
+        storageKey: { type: string }
+        timestampMs: { type: integer, minimum: 0 }
+    VisualQCShot:
+      type: object
+      required: [shotId, metrics]
+      properties:
+        shotId: { type: string }
+        metrics:
+          type: object
+          required: [shotSize, composition, cameraAngle, depth, lighting, subjectPlacement, productPlacement]
+          properties:
+            shotSize: { type: number, minimum: 0, maximum: 1 }
+            composition: { type: number, minimum: 0, maximum: 1 }
+            cameraAngle: { type: number, minimum: 0, maximum: 1 }
+            depth: { type: number, minimum: 0, maximum: 1 }
+            lighting: { type: number, minimum: 0, maximum: 1 }
+            subjectPlacement: { type: number, minimum: 0, maximum: 1 }
+            productPlacement: { type: number, minimum: 0, maximum: 1 }
+        defects:
+          type: array
+          items:
+            type: object
+            required: [code, severity, message, evidenceFrameIds]
+            properties:
+              code: { type: string }
+              severity: { type: string, enum: [info, warning, critical] }
+              message: { type: string }
+              evidenceFrameIds: { type: array, items: { type: string } }
+    VisualQCOverride:
+      type: object
+      required: [decision, reason, by, at]
+      properties:
+        decision: { type: string, enum: [accept, reject] }
+        reason: { type: string }
+        by: { type: string }
+        at: { type: string, format: date-time }

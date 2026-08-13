@@ -10,7 +10,8 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/hotkhwan/affiliate-api/internal/buildinfo"
+	"github.com/hotkhwan/llm-api/internal/buildinfo"
+	"github.com/hotkhwan/llm-api/internal/mission"
 )
 
 const requestIDHeader = "X-Request-ID"
@@ -20,12 +21,16 @@ var validRequestID = regexp.MustCompile(`^[A-Za-z0-9._-]{1,128}$`)
 type RequestIDGenerator func() (string, error)
 
 type Options struct {
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
-	BodyLimit    int
-	Concurrency  int
-	RequestID    RequestIDGenerator
+	ReadTimeout                time.Duration
+	WriteTimeout               time.Duration
+	IdleTimeout                time.Duration
+	BodyLimit                  int
+	Concurrency                int
+	RequestID                  RequestIDGenerator
+	Mission                    *mission.Service
+	BasePath                   string
+	MissionIdentity            mission.IdentityVerifier
+	AllowTrustedIdentityHeader bool
 }
 
 type Readiness struct {
@@ -45,7 +50,7 @@ func New(logger *slog.Logger, metadata buildinfo.Provider, readiness *Readiness,
 		options.RequestID = randomRequestID
 	}
 	app := fiber.New(fiber.Config{
-		AppName:               "affiliate-api",
+		AppName:               "llm-api",
 		DisableStartupMessage: true,
 		ReadTimeout:           options.ReadTimeout,
 		WriteTimeout:          options.WriteTimeout,
@@ -55,18 +60,22 @@ func New(logger *slog.Logger, metadata buildinfo.Provider, readiness *Readiness,
 	})
 	app.Use(requestLogger(logger, options.RequestID))
 
-	app.Get("/healthz", func(c *fiber.Ctx) error {
+	root := app.Group(options.BasePath)
+	root.Get("/healthz", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{"status": "ok"})
 	})
-	app.Get("/readyz", func(c *fiber.Ctx) error {
+	root.Get("/readyz", func(c *fiber.Ctx) error {
 		if !readiness.ready.Load() {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"status": "not_ready"})
 		}
 		return c.JSON(fiber.Map{"status": "ready"})
 	})
-	app.Get("/version", func(c *fiber.Ctx) error {
+	root.Get("/version", func(c *fiber.Ctx) error {
 		return c.JSON(metadata.Metadata())
 	})
+	if options.Mission != nil {
+		mission.NewSecureHTTPHandler(options.Mission, options.MissionIdentity, options.AllowTrustedIdentityHeader).Register(root.Group("/v1"))
+	}
 
 	return app
 }

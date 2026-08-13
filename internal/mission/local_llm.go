@@ -1,0 +1,196 @@
+package mission
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+)
+
+// OpenAICompatibleCaptioner calls a local OpenAI-compatible endpoint. The
+// caller should always wrap it in FallbackCaptioner so model downtime cannot
+// block a beginner's first post.
+type OpenAICompatibleCaptioner struct {
+	Endpoint string
+	Model    string
+	APIKey   string
+	Client   *http.Client
+}
+
+type OpenAICompatiblePlanner struct {
+	Endpoint string
+	Model    string
+	APIKey   string
+	Client   *http.Client
+}
+
+func (g OpenAICompatiblePlanner) Plan(ctx context.Context, request PlanRequest) (PlanResult, error) {
+	endpoint, err := url.Parse(strings.TrimRight(g.Endpoint, "/") + "/chat/completions")
+	if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Host == "" {
+		return PlanResult{}, fmt.Errorf("invalid local LLM endpoint")
+	}
+	if strings.TrimSpace(g.Model) == "" {
+		return PlanResult{}, fmt.Errorf("local LLM model is required")
+	}
+	facts, err := json.Marshal(request.Product)
+	if err != nil {
+		return PlanResult{}, err
+	}
+	locale, err := normalizeLocale(request.Locale)
+	if err != nil {
+		return PlanResult{}, err
+	}
+	skeleton := deterministicProductionSpecForLocale(request.Product, request.Shots, locale)
+	skeletonJSON, _ := json.Marshal(skeleton)
+	referencesJSON, _ := json.Marshal(request.ProductReferences)
+	language := localized(locale, "Thai", "English", "Simplified Chinese")
+	prompt := fmt.Sprintf(`Act through these roles in one shared runtime: creativeDirector, storyDirector, cinematographyDirector, lightingDirector, brandGuard, productionPlanner, promptCompiler.
+Return one JSON object with keys caption, cta, hashtags, productionSpec. productionSpec must preserve schemaVersion %q, exactly 3 shots, 9:16, exactly 8 seconds total and all continuity bible fields.
+Verified product JSON: %s
+Exactly one real product reference metadata JSON: %s
+Safe deterministic skeleton to improve without changing facts: %s
+Replace generic capture instructions with a cinematic commercial action for every shot. Never tell the user to "take a photo or video". Shot 1 must hook with a product hero reveal, shot 2 must demonstrate only the verified use with tactile detail, and shot 3 must end on a premium product beauty close-up. Specify purposeful shot size, camera movement, composition and lighting while keeping the same product identity.
+Write all user-visible prose in %s (locale %s). Preserve product names and user-provided facts exactly as supplied; do not translate or alter them. Treat the real reference as the visual source of truth, while never claiming visual details that are absent from verified product JSON. Never invent price, promotion, product capability, sales result or income promise.`, ProductionSpecSchemaVersion, facts, referencesJSON, skeletonJSON, language, locale)
+	payload := map[string]any{
+		"model":                g.Model,
+		"temperature":          0.6,
+		"top_p":                0.95,
+		"max_tokens":           2048,
+		"response_format":      map[string]string{"type": "json_object"},
+		"chat_template_kwargs": map[string]bool{"enable_thinking": false},
+		"messages":             []map[string]string{{"role": "system", "content": "You are the KWANNI production brain. Produce strictly typed, truthful affiliate production plans."}, {"role": "user", "content": prompt}},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return PlanResult{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	if err != nil {
+		return PlanResult{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	if g.APIKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+g.APIKey)
+	}
+	client := g.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(httpRequest)
+	if err != nil {
+		return PlanResult{}, fmt.Errorf("local LLM planning request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return PlanResult{}, fmt.Errorf("local LLM planning status %d", response.StatusCode)
+	}
+	var completion struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			TotalTokens int64 `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 2<<20)).Decode(&completion); err != nil {
+		return PlanResult{}, fmt.Errorf("decode local LLM planning response: %w", err)
+	}
+	if len(completion.Choices) == 0 {
+		return PlanResult{}, fmt.Errorf("local LLM returned no planning choice")
+	}
+	var output struct {
+		Caption        string         `json:"caption"`
+		CTA            string         `json:"cta"`
+		Hashtags       []string       `json:"hashtags"`
+		ProductionSpec ProductionSpec `json:"productionSpec"`
+	}
+	if err := json.Unmarshal([]byte(completion.Choices[0].Message.Content), &output); err != nil {
+		return PlanResult{}, fmt.Errorf("decode local LLM production JSON: %w", err)
+	}
+	return PlanResult{Caption: output.Caption, CTA: output.CTA, Hashtags: output.Hashtags, ProductionSpec: output.ProductionSpec, Roles: append([]RoleExecution(nil), defaultRoleExecutions...), Provider: "local-qwen-role-planner", Units: completion.Usage.TotalTokens}, nil
+}
+
+func (g OpenAICompatibleCaptioner) Generate(ctx context.Context, request CaptionRequest) (CaptionResult, error) {
+	endpoint, err := url.Parse(strings.TrimRight(g.Endpoint, "/") + "/chat/completions")
+	if err != nil || (endpoint.Scheme != "http" && endpoint.Scheme != "https") || endpoint.Host == "" {
+		return CaptionResult{}, fmt.Errorf("invalid local LLM endpoint")
+	}
+	model := strings.TrimSpace(g.Model)
+	if model == "" {
+		return CaptionResult{}, fmt.Errorf("local LLM model is required")
+	}
+	productFacts, err := json.Marshal(request.Product)
+	if err != nil {
+		return CaptionResult{}, err
+	}
+	locale, err := normalizeLocale(request.Locale)
+	if err != nil {
+		return CaptionResult{}, err
+	}
+	language := localized(locale, "Thai", "English", "Simplified Chinese")
+	prompt := fmt.Sprintf("Verified product JSON: %s\nWrite JSON in %s (locale %s) with caption, cta, hashtags. Preserve product names and user-provided facts exactly as supplied. Use only the JSON facts; never invent prices, promotions, features, results, or income promises.", productFacts, language, locale)
+	payload := map[string]any{
+		"model":           model,
+		"temperature":     0.2,
+		"response_format": map[string]string{"type": "json_object"},
+		"messages":        []map[string]string{{"role": "system", "content": "You are a truthful KWANNI assistant. Follow the requested output locale and never promise income."}, {"role": "user", "content": prompt}},
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return CaptionResult{}, err
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
+	if err != nil {
+		return CaptionResult{}, err
+	}
+	httpRequest.Header.Set("Content-Type", "application/json")
+	if g.APIKey != "" {
+		httpRequest.Header.Set("Authorization", "Bearer "+g.APIKey)
+	}
+	client := g.Client
+	if client == nil {
+		client = http.DefaultClient
+	}
+	response, err := client.Do(httpRequest)
+	if err != nil {
+		return CaptionResult{}, fmt.Errorf("local LLM request: %w", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return CaptionResult{}, fmt.Errorf("local LLM status %d", response.StatusCode)
+	}
+	var completion struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Usage struct {
+			TotalTokens int64 `json:"total_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.NewDecoder(io.LimitReader(response.Body, 1<<20)).Decode(&completion); err != nil {
+		return CaptionResult{}, fmt.Errorf("decode local LLM response: %w", err)
+	}
+	if len(completion.Choices) == 0 {
+		return CaptionResult{}, fmt.Errorf("local LLM returned no choice")
+	}
+	var output struct {
+		Caption  string   `json:"caption"`
+		CTA      string   `json:"cta"`
+		Hashtags []string `json:"hashtags"`
+	}
+	if err := json.Unmarshal([]byte(completion.Choices[0].Message.Content), &output); err != nil {
+		return CaptionResult{}, fmt.Errorf("decode local LLM JSON: %w", err)
+	}
+	if strings.TrimSpace(output.Caption) == "" {
+		return CaptionResult{}, fmt.Errorf("local LLM returned empty caption")
+	}
+	return CaptionResult{Caption: output.Caption, CTA: output.CTA, Hashtags: output.Hashtags, Provider: "local-openai-compatible", Units: completion.Usage.TotalTokens}, nil
+}

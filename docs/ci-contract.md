@@ -6,8 +6,8 @@ There is currently no Jenkins job, GitHub Actions workflow, or other remote CI a
 
 The intended shared-pipeline job names are:
 
-- `dev-affiliate-api` for an exact merge commit on `develop`
-- `prod-affiliate-api` for a separately approved exact commit on `main`
+- `dev-llm-api` for an exact merge commit on `develop`
+- `prod-llm-api` for a separately approved exact commit on `main`
 
 These names describe the integration contract only; the jobs do not exist yet. This public repository intentionally has no environment-specific `Jenkinsfile` and does not define credential IDs, registry locations, cluster details, or deployment endpoints.
 

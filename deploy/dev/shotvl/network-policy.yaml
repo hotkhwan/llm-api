@@ -1,0 +1,25 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kwanni-shotvl-private
+  labels:
+    app.kubernetes.io/name: kwanni-shotvl
+    app.kubernetes.io/part-of: kwanni
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kwanni-shotvl
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app: dev-llm-api
+      ports:
+        - protocol: TCP
+          port: 8000
+  # Runtime is offline. Pre-fetch the immutable model revision before scale-up.
+  egress: []
+

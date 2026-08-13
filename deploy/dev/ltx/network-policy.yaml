@@ -1,0 +1,10 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata: { name: kwanni-ltx-private, namespace: dev }
+spec:
+  podSelector: { matchLabels: { app: kwanni-ltx } }
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from: [{ podSelector: { matchLabels: { app: dev-llm-api } } }]
+      ports: [{ protocol: TCP, port: 8092 }]
+  egress: []
